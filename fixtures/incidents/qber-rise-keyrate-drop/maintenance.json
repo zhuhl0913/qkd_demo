@@ -1,0 +1,17 @@
+{
+  "evidenceId": "ev-maint-chg-4418",
+  "title": "维护窗口与变更单",
+  "tickets": [
+    {
+      "ticketId": "CHG-4418",
+      "window": {
+        "from": "2026-10-24T00:10:00Z",
+        "to": "2026-10-24T00:40:00Z"
+      },
+      "nodeId": "NODE-A-HZ-04",
+      "summary": "安装偏振控制器固件包。工单状态：已完成。后检查附件：无。",
+      "changedComponents": ["polarization-controller firmware"],
+      "impactedLinkIds": ["LN-17"]
+    }
+  ]
+}

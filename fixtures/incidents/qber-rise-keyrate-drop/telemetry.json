@@ -1,0 +1,22 @@
+{
+  "evidenceId": "ev-telemetry-qber-keyrate",
+  "title": "LN-17 QBER 与筛选后密钥率",
+  "unit": {
+    "qber": "percent",
+    "keyRate": "kbps"
+  },
+  "series": [
+    { "t": "2026-10-24T00:50:00Z", "qberPercent": 1.7, "keyRateKbps": 12.6 },
+    { "t": "2026-10-24T01:00:00Z", "qberPercent": 1.8, "keyRateKbps": 12.5 },
+    { "t": "2026-10-24T01:10:00Z", "qberPercent": 1.8, "keyRateKbps": 12.4 },
+    { "t": "2026-10-24T01:20:00Z", "qberPercent": 2.2, "keyRateKbps": 11.1 },
+    { "t": "2026-10-24T01:30:00Z", "qberPercent": 2.9, "keyRateKbps": 9.4 },
+    { "t": "2026-10-24T01:40:00Z", "qberPercent": 3.6, "keyRateKbps": 7.8 },
+    { "t": "2026-10-24T01:50:00Z", "qberPercent": 4.4, "keyRateKbps": 6.2 },
+    { "t": "2026-10-24T02:00:00Z", "qberPercent": 5.1, "keyRateKbps": 4.9 },
+    { "t": "2026-10-24T02:10:00Z", "qberPercent": 5.8, "keyRateKbps": 4.0 },
+    { "t": "2026-10-24T02:20:00Z", "qberPercent": 6.2, "keyRateKbps": 3.4 },
+    { "t": "2026-10-24T02:30:00Z", "qberPercent": 6.4, "keyRateKbps": 3.1 },
+    { "t": "2026-10-24T02:40:00Z", "qberPercent": 6.5, "keyRateKbps": 3.0 }
+  ]
+}

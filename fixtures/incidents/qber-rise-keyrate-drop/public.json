@@ -1,0 +1,22 @@
+{
+  "id": "qber-rise-keyrate-drop",
+  "title": "QBER 上升且筛选后密钥率下降",
+  "disclaimer": "合成演练数据。不是国盾量子（QuantumCTek）真机，不是现网链路，也不是商业密钥率。QKD 字段只是场景皮肤，不代表协议实现。",
+  "severity": "sev-2",
+  "openedAt": "2026-10-24T02:40:00Z",
+  "timeWindow": {
+    "from": "2026-10-24T00:00:00Z",
+    "to": "2026-10-24T03:00:00Z"
+  },
+  "nodes": {
+    "alice": "NODE-A-HZ-04",
+    "bob": "NODE-B-SH-11",
+    "linkId": "LN-17"
+  },
+  "symptoms": [
+    "QBER 在大约 80 分钟内从 1.8% 升到 6.4%",
+    "同期筛选后密钥率从大约 12.4 kbps 降到大约 3.1 kbps",
+    "斜率开始前大约 40 分钟，一次维护窗口刚刚关闭"
+  ],
+  "maintenanceWindowSummary": "变更单 CHG-4418：00:10–00:40 UTC 在 NODE-A-HZ-04 安装偏振控制器固件。工单标记完成，公开摘要里没有附后检查记录。"
+}

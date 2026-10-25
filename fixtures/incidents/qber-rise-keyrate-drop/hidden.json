@@ -1,0 +1,11 @@
+{
+  "leakSentinel": "ROOT_CAUSE_SENTINEL::qber-rise-keyrate-drop::POL_BASIS_OFFSET_AFTER_FW",
+  "rootCause": {
+    "code": "POL_BASIS_OFFSET_AFTER_FW",
+    "summary": "Firmware CHG-4418 left the Alice polarization controller 3.2 degrees off the H/V basis. Excess QBER is basis misalignment, not channel loss or eavesdropping.",
+    "oracle": {
+      "confirmingTestId": "pol-controller-basis-check",
+      "note": "ORACLE_ONLY::do-not-copy-into-tool-results"
+    }
+  }
+}

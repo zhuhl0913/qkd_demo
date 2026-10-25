@@ -1,0 +1,31 @@
+{
+  "evidenceId": "ev-logs-ln17",
+  "title": "LN-17 设备与链路日志",
+  "entries": [
+    {
+      "at": "2026-10-24T00:41:12Z",
+      "source": "alice",
+      "message": "NODE-A-HZ-04 固件任务：CHG-4418 安装结束。后检查栏为空，操作员关闭了维护窗口。"
+    },
+    {
+      "at": "2026-10-24T01:22:03Z",
+      "source": "link",
+      "message": "LN-17 QBER 监视：越过 3.0% 警告线。密钥率斜率为负。"
+    },
+    {
+      "at": "2026-10-24T01:48:40Z",
+      "source": "bob",
+      "message": "NODE-B-SH-11 筛选后密钥率 6.2 kbps，低于 8 kbps 观察线。探测器温度稳定。"
+    },
+    {
+      "at": "2026-10-24T02:05:18Z",
+      "source": "bob",
+      "message": "暗计数快照 610 cps。无过载标记。"
+    },
+    {
+      "at": "2026-10-24T02:16:55Z",
+      "source": "link",
+      "message": "时钟偏差 26 ps。同步锁定保持。"
+    }
+  ]
+}

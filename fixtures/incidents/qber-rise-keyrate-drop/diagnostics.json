@@ -1,0 +1,54 @@
+{
+  "catalog": [
+    {
+      "testId": "pol-controller-basis-check",
+      "title": "偏振控制器基矢残差",
+      "measures": "读取 Alice 端偏振控制器的残余基矢角，并对照规格上限。"
+    },
+    {
+      "testId": "channel-loss-budget",
+      "title": "信道损耗预算",
+      "measures": "核对 LN-17 分段损耗与开通基线的差。"
+    },
+    {
+      "testId": "detector-dark-count",
+      "title": "探测器暗计数",
+      "measures": "读取 Bob 端探测器暗计数，看是否偏离基线。"
+    },
+    {
+      "testId": "clock-sync-offset",
+      "title": "时钟同步偏差",
+      "measures": "读取链路时钟偏差，看同步锁定是否仍在门限内。"
+    }
+  ],
+  "outcomes": [
+    {
+      "testId": "pol-controller-basis-check",
+      "evidenceId": "ev-diag-pol-controller-basis-check",
+      "title": "偏振控制器自检",
+      "observed": "NODE-A-HZ-04 偏振控制器自检：残余基矢角读数落在 3.1° 到 3.4°，规格上限 0.5°。当前安装包对应工单 CHG-4418。本测试没有测量信道损耗。",
+      "withinLimit": false
+    },
+    {
+      "testId": "channel-loss-budget",
+      "evidenceId": "ev-diag-channel-loss-budget",
+      "title": "信道损耗预算结果",
+      "observed": "LN-17 分段损耗合计 9.8 dB，开通基线 9.6 dB，相差 0.2 dB，处在维护窗口允许范围内。",
+      "withinLimit": true
+    },
+    {
+      "testId": "detector-dark-count",
+      "evidenceId": "ev-diag-detector-dark-count",
+      "title": "探测器暗计数结果",
+      "observed": "Bob 端探测器暗计数 620 cps，基线 600±80 cps，没有过载。",
+      "withinLimit": true
+    },
+    {
+      "testId": "clock-sync-offset",
+      "evidenceId": "ev-diag-clock-sync-offset",
+      "title": "时钟同步结果",
+      "observed": "链路时钟偏差 28 ps，门限 80 ps，同步锁定保持。",
+      "withinLimit": true
+    }
+  ]
+}
