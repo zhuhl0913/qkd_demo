@@ -16,6 +16,7 @@ import {
   type DeskFocus,
   type LoopStepView,
 } from "./desk-loop";
+import { canExportReport, downloadInvestigationReport } from "./investigation-report";
 import { PHASE_LABELS, PHASES, type Hypothesis, type HypothesisStatus, type Phase, type PublicSession } from "@/lib/types";
 
 type ApiBody = {
@@ -71,6 +72,7 @@ export function InvestigationDesk() {
   const [pending, setPending] = useState(false);
   const [testId, setTestId] = useState("");
   const [highlight, setHighlight] = useState<DeskDiff | null>(null);
+  const [exportNote, setExportNote] = useState<string | null>(null);
   const sessionRef = useRef<PublicSession | null>(null);
   const busyRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -108,6 +110,7 @@ export function InvestigationDesk() {
     if (diff || cleared) setHighlight(diff);
     sessionRef.current = next;
     setSession(next);
+    setExportNote(null);
     setTestId((current) => {
       if (next.proposal?.testId) return next.proposal.testId;
       if (next.diagnosticCatalog.some((item) => item.testId === current)) return current;
@@ -205,10 +208,11 @@ export function InvestigationDesk() {
     !moment.detail.includes("API_KEY");
   const detail = keyNote ? `${moment.detail} 密钥未配置。` : moment.detail;
   const strayBanner = banner && banner !== session?.error ? banner : null;
+  const exportReady = session ? canExportReport(session) : false;
 
   return (
     <main className="nw mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-6">
-      <header className="flex items-start justify-between gap-3 border-b border-[var(--nw-line)] pb-4">
+      <header className="flex flex-col gap-3 border-b border-[var(--nw-line)] pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="nw-kicker">事件调查台</p>
           <h1 className="truncate text-lg font-medium">{session?.incident.title ?? "合成 QKD 运维事件"}</h1>
@@ -219,7 +223,20 @@ export function InvestigationDesk() {
             </p>
           ) : null}
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex flex-wrap gap-2 sm:shrink-0 sm:justify-end">
+          <DeskButton
+            tone={moment.focus === "done" && exportReady ? "primary" : "quiet"}
+            disabled={!exportReady}
+            title={exportReady ? "下载当前调查的 Markdown 报告" : "有假设或证据后可导出"}
+            data-action="export-report"
+            onClick={() => {
+              if (!session || !canExportReport(session)) return;
+              const fileName = downloadInvestigationReport(session);
+              setExportNote(`已下载 ${fileName}`);
+            }}
+          >
+            导出报告
+          </DeskButton>
           <DeskButton
             tone="quiet"
             disabled={pending || !session || session.hypotheses.length === 0}
@@ -239,6 +256,11 @@ export function InvestigationDesk() {
       </header>
 
       {session ? <p className="nw-faint text-xs leading-5">{session.incident.disclaimer}</p> : null}
+      {exportNote ? (
+        <p className="nw-muted text-sm" role="status">
+          {exportNote}
+        </p>
+      ) : null}
       {strayBanner ? <Alert>{strayBanner}</Alert> : null}
       {loadError ? <Alert>{loadError}</Alert> : null}
 

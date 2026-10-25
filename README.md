@@ -22,6 +22,14 @@ pnpm dev
 
 没有密钥时页面仍能打开，事件头来自公开 fixture。点击「运行调查」仍是一次请求：响应是 NDJSON，先把阶段推到「装载」，再以明确错误结束。不会伪造工具轨迹或假设。
 
+## 导出报告
+
+页眉「导出报告」在已经有假设或证据时可用。它下载当前会话的 Markdown，文件名形如 `investigation-report-qber-rise-keyrate-drop.md`。停在「假设已更新」或点过「结束调查」之后直接导出，不用再跑一轮。
+
+报告里有事件摘要、时间窗、证据要点、假设（优先 / 调查中 / 已排除）和理由、转向、诊断提案与批准、工具轨迹摘要、阶段说明，以及合成数据声明。这是本地交接稿，不是外部工单，也不会触发修复。
+
+本地看：`pnpm dev`，打开 [http://127.0.0.1:3457](http://127.0.0.1:3457)。跑完一轮调查（或至少写出假设）后点「导出报告」。空会话上这个按钮是灰的。
+
 有密钥时，同一次请求会在模型还在跑的时候陆续推送阶段和工具轨迹，右侧轨迹逐条出现，阶段不会停在「空闲」。结束后仍停在「批准诊断」（或当前等价状态）。排除、优先、请求证据和批准诊断仍是这一轮之外的操作。
 
 本地核对 SiliconFlow：把 `.env.local` 配成 `AI_PROVIDER=openai-compatible`、`AI_BASE_URL`（例如 `https://api.siliconflow.cn/v1`）、`AI_API_KEY` 和 `AI_MODEL`，运行 `pnpm dev`，打开端口 3457。点一次「运行调查」。阶段文字应从「空闲」变为「装载」「调查」，工具轨迹随每次工具返回增加，最后出现假设和「批准诊断」。不要把这一轮拆成多次点击。
@@ -52,6 +60,7 @@ app/api/session/route.ts        读取 / 重置 / 结束
 app/api/steer/route.ts          排除、优先、请求一类证据
 app/api/diagnostic/route.ts     批准或拒绝诊断（服务器标记）
 components/investigation-desk.tsx
+components/investigation-report.ts  从当前公开会话生成 Markdown 交接稿
 lib/agent.ts                    唯一的 ToolLoopAgent
 lib/tools.ts                    五个 AI SDK tool()
 lib/hypotheses.ts               Zod 结构化输出（不是工具）

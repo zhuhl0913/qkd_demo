@@ -81,7 +81,7 @@ const INPUT_LABELS: Record<string, string> = {
 
 type LoopFlags = Record<LoopStepId, boolean>;
 
-function hasFreshEvidence(session: PublicSession): boolean {
+export function hasFreshEvidence(session: PublicSession): boolean {
   return (
     session.evidence.some((item) => item.evidenceClass === "diagnostic") ||
     session.trace.some((event) => event.toolName === "run_diagnostic_test" && event.status === "ok")
