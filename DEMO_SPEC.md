@@ -56,6 +56,9 @@ Next.js + **Vercel AI SDK 7**, single Agent; model provider swappable via env (O
 
 `POST /api/agent` is one request per run. The body is NDJSON: `progress` lines are public session snapshots (phase, trace, evidence) emitted while the single `ToolLoopAgent.generate` call is still in flight, then one `result` line. Steer and diagnostic approve stay separate requests. Those HITL actions are the pauses between runs.
 
+## Session export (v1)
+When the public session already has hypotheses or evidence, the desk button 「导出报告」 downloads a Markdown handoff of that session. The file includes the incident summary, time window, evidence highlights, hypotheses with status and rationale, steering, any diagnostic proposal and approval, a brief tool trail, the phase note, and the synthetic-data disclaimer. It is built in the browser from the session already on screen, including after 「假设已更新」 or conclude. It does not start an agent run, does not call an ITSM API, and does not read `hidden.json`. Format can change later; v1 is this Markdown file.
+
 ## M0 acceptance
 - [x] App boots with `pnpm dev`
 - [x] AGENTS.md + DEMO_SPEC.md in repo root
