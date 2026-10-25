@@ -8,7 +8,7 @@
     "start": "next start -p 3457 -H 0.0.0.0",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node --conditions=react-server --import tsx scripts/redline-smoke.ts"
+    "test": "node --conditions=react-server --import tsx scripts/redline-smoke.ts && node --conditions=react-server --import tsx scripts/tool-loop-smoke.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.102",

@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { guardToolResult, resolveDiagnosticEvidence } from "./diagnostic-resolver";
 import { assertKnownIncident } from "./fixture-io";
+import { catalogTestIdSchema } from "./hypotheses";
 import {
   loadDiagnosticCatalog,
   loadLogs,
@@ -13,7 +14,8 @@ import { DEFAULT_INCIDENT_ID, type EnvironmentToolName } from "./types";
 
 const incidentField = z
   .string()
-  .describe("Incident id. Use the id from the investigation prompt.");
+  .optional()
+  .describe("Incident id from the investigation prompt. Omit only if you do not know it.");
 
 function requireIncident(incidentId: string | undefined): string {
   const id = incidentId?.trim() || DEFAULT_INCIDENT_ID;
@@ -149,7 +151,7 @@ export const investigationTools = {
 
   list_available_diagnostics: tool({
     description:
-      "List diagnostic tests that can be proposed for HITL approval. Does not run them and does not include results.",
+      "List diagnostic tests that can be proposed for HITL approval. Does not run them and does not include results. Each returned testId is a catalog id. Tool names are not test ids.",
     inputSchema: z.object({
       incidentId: incidentField,
     }),
@@ -175,10 +177,12 @@ export const investigationTools = {
 
   run_diagnostic_test: tool({
     description:
-      "Run one diagnostic test. Refuses unless the server HITL approval flag is set for this exact testId. Never returns a hidden root cause.",
+      "Run one catalog diagnostic. testId must be the approvedTestId from the user message, which is a catalog id from list_available_diagnostics. Refuses unless the server HITL approval flag matches that id. Never returns a hidden root cause. Do not pass a tool name.",
     inputSchema: z.object({
       incidentId: incidentField,
-      testId: z.string().describe("testId from list_available_diagnostics."),
+      testId: catalogTestIdSchema.describe(
+        "Catalog testId. When approvedTestId is set, pass that exact id.",
+      ),
     }),
     execute: async ({ incidentId, testId }) => {
       const id = requireIncident(incidentId);
