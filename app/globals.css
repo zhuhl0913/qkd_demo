@@ -8,11 +8,37 @@ body {
 }
 
 button,
-select {
+select,
+summary {
   font: inherit;
+}
+
+summary {
+  cursor: pointer;
 }
 
 pre {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.desk-new {
+  box-shadow: inset 3px 0 0 #b45309;
+  background-color: #fffbeb;
+  animation: desk-flash 1.2s ease-out 1;
+}
+
+@keyframes desk-flash {
+  from {
+    background-color: #fcd34d;
+  }
+  to {
+    background-color: #fffbeb;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desk-new {
+    animation: none;
+  }
 }
