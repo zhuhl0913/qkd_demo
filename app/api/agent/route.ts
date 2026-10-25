@@ -1,13 +1,8 @@
-import { runInvestigation } from "@/lib/run-investigation";
-import { toPublicSession } from "@/lib/session-store";
+import { connection } from "next/server";
+import { investigationResponse } from "@/lib/investigation-stream";
 
+/** One investigation run. The body is NDJSON progress, then one result line. */
 export async function POST() {
-  const result = await runInvestigation();
-  if (!result.ok) {
-    return Response.json(
-      { ok: false, error: result.error, session: toPublicSession() },
-      { status: 500 },
-    );
-  }
-  return Response.json({ ok: true, session: toPublicSession() });
+  await connection();
+  return investigationResponse();
 }
