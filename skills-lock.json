@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "oil-frontend": {
+      "source": "oil-oil/oil-frontend",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "5eef3b49911f951726793c68b2cfeb8980ef270bc5a86d388d6cfca231c7d921"
+    }
+  }
+}
