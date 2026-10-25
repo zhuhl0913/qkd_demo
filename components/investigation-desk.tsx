@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { readInvestigationNdjson } from "@/lib/investigation-events";
 import {
   briefInput,
   deskMoment,
@@ -36,6 +37,16 @@ const LOADING_STEPS: LoopStepView[] = LOOP_STEPS.map((step, index) => ({
   mark: index === 0 ? "current" : "upcoming",
 }));
 
+const RUNNING_PHASES = new Set<Phase>(["ingesting", "investigating", "testing", "updating", "proposing_test"]);
+
+function yieldPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 async function postJson(url: string, body?: unknown): Promise<ApiBody> {
   const response = await fetch(url, {
     method: "POST",
@@ -61,6 +72,8 @@ export function InvestigationDesk() {
   const [testId, setTestId] = useState("");
   const [highlight, setHighlight] = useState<DeskDiff | null>(null);
   const sessionRef = useRef<PublicSession | null>(null);
+  const busyRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,7 +98,14 @@ export function InvestigationDesk() {
   }, []);
 
   function remember(next: PublicSession) {
-    setHighlight(diffSessions(sessionRef.current, next));
+    const diff = diffSessions(sessionRef.current, next);
+    const cleared =
+      next.phase === "idle" &&
+      next.trace.length === 0 &&
+      next.evidence.length === 0 &&
+      next.hypotheses.length === 0 &&
+      next.steering.length === 0;
+    if (diff || cleared) setHighlight(diff);
     sessionRef.current = next;
     setSession(next);
     setTestId((current) => {
@@ -101,6 +121,8 @@ export function InvestigationDesk() {
   }
 
   async function run(task: () => Promise<ApiBody>) {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setPending(true);
     setBanner(null);
     try {
@@ -108,9 +130,64 @@ export function InvestigationDesk() {
     } catch (error) {
       setBanner(error instanceof Error ? error.message : "请求失败");
     } finally {
+      busyRef.current = false;
       setPending(false);
     }
   }
+
+  async function runInvestigationStream() {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    const controller = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = controller;
+    setPending(true);
+    setBanner(null);
+    let sawResult = false;
+    try {
+      const response = await fetch("/api/agent", {
+        method: "POST",
+        headers: { Accept: "application/x-ndjson" },
+        signal: controller.signal,
+      });
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!response.body || !contentType.includes("ndjson")) {
+        const text = await response.text();
+        throw new Error(text.slice(0, 180) || `请求失败（${response.status}）`);
+      }
+      await readInvestigationNdjson(response.body, async (event) => {
+        if (controller.signal.aborted) return;
+        remember(event.session);
+        if (event.type === "result") {
+          sawResult = true;
+          setBanner(event.ok ? null : (event.error ?? "操作失败"));
+          setPending(false);
+          return;
+        }
+        await yieldPaint();
+      });
+      if (!sawResult && !controller.signal.aborted) {
+        const recovered = await fetch("/api/session")
+          .then(async (next) => (await next.json()) as ApiBody)
+          .catch(() => null);
+        if (recovered?.session) remember(recovered.session);
+        if (!recovered?.session || RUNNING_PHASES.has(recovered.session.phase)) {
+          setBanner("这一轮的进度流中断了。");
+        }
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setBanner(error instanceof Error ? error.message : "请求失败");
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      busyRef.current = false;
+      setPending(false);
+    }
+  }
+
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
   const phase: Phase = session?.phase ?? "idle";
   const moment = session
@@ -177,7 +254,7 @@ export function InvestigationDesk() {
           testId={testId}
           showApprove={showApprove}
           onTestId={setTestId}
-          onRun={() => run(() => postJson("/api/agent"))}
+          onRun={() => void runInvestigationStream()}
           onApprove={() => run(() => postJson("/api/diagnostic", { decision: "approve", testId }))}
           onReject={() => run(() => postJson("/api/diagnostic", { decision: "reject" }))}
         />
@@ -191,7 +268,7 @@ export function InvestigationDesk() {
             run(() => postJson("/api/steer", { action: "request_evidence", evidenceClass }))
           }
         />
-        <TraceTimeline session={session} highlight={highlight} />
+        <TraceTimeline session={session} highlight={highlight} pending={pending} />
         <EvidenceBoard session={session} highlight={highlight} />
         {session ? <IncidentDetails session={session} /> : null}
         <PhaseDetails phase={phase} trail={session?.phaseTrail ?? ["idle"]} />
@@ -232,7 +309,13 @@ function PrimaryZone({
   const runLabel = pending ? "调查进行中" : focus === "rerun" ? "再运行调查" : "运行调查";
   const showRun = Boolean(session) && (focus === "run" || focus === "rerun" || (focus === "wait" && pending));
   return (
-    <section className="nw-panel p-4 sm:p-5" aria-live="polite" data-desk-focus={focus}>
+    <section
+      className="nw-panel p-4 sm:p-5"
+      aria-live="polite"
+      aria-busy={pending}
+      data-desk-focus={focus}
+      data-phase={phase}
+    >
       <LoopTrack steps={steps} />
       <p className="nw-faint mt-4 text-sm">{PHASE_LABELS[phase]}</p>
       <h2 className="mt-1 text-2xl font-medium tracking-tight">{title}</h2>
@@ -480,14 +563,22 @@ function EvidenceBoard({ session, highlight }: { session: PublicSession | null; 
   );
 }
 
-function TraceTimeline({ session, highlight }: { session: PublicSession | null; highlight: DeskDiff | null }) {
+function TraceTimeline({
+  session,
+  highlight,
+  pending,
+}: {
+  session: PublicSession | null;
+  highlight: DeskDiff | null;
+  pending: boolean;
+}) {
   const trace = session?.trace ?? [];
   const fresh = new Set(highlight?.traceIds ?? []);
   return (
     <aside className="nw-panel p-4 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-5 lg:row-start-1 lg:self-start">
       <h2 className="nw-muted text-sm font-medium">工具轨迹</h2>
       {trace.length === 0 ? (
-        <p className="nw-faint mt-3 text-sm">还没有工具调用。</p>
+        <p className="nw-faint mt-3 text-sm">{pending ? "这一轮还没有工具返回。" : "还没有工具调用。"}</p>
       ) : (
         <ol className="mt-4" aria-label="工具轨迹">
           {trace.map((event, index) => {

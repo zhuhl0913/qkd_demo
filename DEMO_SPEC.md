@@ -54,6 +54,8 @@ The badge lists every phase and highlights the current one. The trail records ph
 ## Runtime (locked)
 Next.js + **Vercel AI SDK 7**, single Agent; model provider swappable via env (OpenAI Responses, OpenAI Chat Completions, or any OpenAI-compatible base URL). See `.env.example`.
 
+`POST /api/agent` is one request per run. The body is NDJSON: `progress` lines are public session snapshots (phase, trace, evidence) emitted while the single `ToolLoopAgent.generate` call is still in flight, then one `result` line. Steer and diagnostic approve stay separate requests. Those HITL actions are the pauses between runs.
+
 ## M0 acceptance
 - [x] App boots with `pnpm dev`
 - [x] AGENTS.md + DEMO_SPEC.md in repo root

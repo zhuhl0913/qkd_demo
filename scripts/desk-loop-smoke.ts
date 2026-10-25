@@ -85,6 +85,40 @@ assert.equal(loopSteps(session(), false)[0]?.label, "查证");
 
 const pending = deskMoment(session(), true);
 assert.equal(pending.focus, "wait");
+assert.equal(pending.title, "调查进行中");
+assert.equal(pending.detail, "正在接上这一轮。");
+assert.doesNotMatch(pending.detail, /空闲/);
+
+const midRun = session({
+  phase: "investigating",
+  phaseTrail: ["idle", "ingesting", "investigating"],
+  evidence: [evidence],
+  trace: [
+    {
+      id: "t-mid",
+      at: "2026-10-25T00:00:01Z",
+      toolName: "query_telemetry",
+      input: { incidentId: "qber-rise-keyrate-drop" },
+      status: "ok",
+      output: { evidence },
+    },
+  ],
+});
+const midMoment = deskMoment(midRun, true);
+assert.equal(midMoment.focus, "wait");
+assert.match(midMoment.detail, /调查/);
+assert.equal(PHASE_LABELS[midRun.phase], "调查");
+assert.equal(loopSteps(midRun, true).find((step) => step.id === "query")?.mark, "current");
+assert.equal(loopSteps(midRun, true).find((step) => step.id === "query")?.done, true);
+
+const midUpdate = session({
+  ...midRun,
+  phase: "updating",
+  phaseTrail: ["idle", "ingesting", "investigating", "updating"],
+});
+assert.match(deskMoment(midUpdate, true).detail, /更新假设/);
+assert.equal(loopSteps(midUpdate, true).find((step) => step.id === "query")?.mark, "done");
+assert.equal(loopSteps(midUpdate, true).find((step) => step.id === "hypothesize")?.mark, "current");
 
 const waitingApproval = deskMoment(firstRun, false);
 assert.equal(waitingApproval.focus, "approve");

@@ -9,9 +9,10 @@ import {
   appendTrace,
   getSession,
   setPhase,
+  toPublicSession,
   upsertEvidence,
 } from "./session-store";
-import type { EvidenceClass } from "./types";
+import type { EvidenceClass, PublicSession } from "./types";
 import { z } from "zod";
 
 const toolEvidenceSchema = z.object({
@@ -29,16 +30,30 @@ function errorMessage(error: unknown): string {
 
 export type InvestigationRunResult = { ok: true } | { ok: false; error: string };
 
+export type InvestigationRunOptions = {
+  /** Public session snapshot after a phase change or a finished tool call. */
+  onProgress?: (session: PublicSession) => void;
+};
+
 /**
  * One investigation turn. `model` is for tests that supply a stand-in provider.
  * The production route omits it and uses the configured provider.
+ * Progress callbacks fire while `generate` is still running so one HTTP stream
+ * can show phase and tool rows before the terminal session.
  */
-export async function runInvestigation(model?: LanguageModel): Promise<InvestigationRunResult> {
+export async function runInvestigation(
+  model?: LanguageModel,
+  options?: InvestigationRunOptions,
+): Promise<InvestigationRunResult> {
   const session = getSession();
   let ranDiagnostic = false;
+  const publish = () => {
+    options?.onProgress?.(toPublicSession());
+  };
 
   try {
     setPhase("ingesting");
+    publish();
     const visible = buildModelVisibleContext({
       incident: loadPublicIncident(session.incidentId),
       evidence: session.evidence,
@@ -51,6 +66,7 @@ export async function runInvestigation(model?: LanguageModel): Promise<Investiga
     const languageModel = model ?? getLanguageModel();
     session.error = null;
     setPhase(session.approval ? "testing" : "investigating");
+    publish();
 
     const agent = createInvestigationAgent(visible.instructions, languageModel);
     const result = await agent.generate({
@@ -80,20 +96,22 @@ export async function runInvestigation(model?: LanguageModel): Promise<Investiga
             });
           }
           if (toolName === "run_diagnostic_test") ranDiagnostic = true;
-          return;
+        } else {
+          appendTrace({
+            id: event.toolCall.toolCallId,
+            at,
+            toolName,
+            input,
+            status: "error",
+            error: errorMessage(event.toolOutput.error),
+          });
         }
-        appendTrace({
-          id: event.toolCall.toolCallId,
-          at,
-          toolName,
-          input,
-          status: "error",
-          error: errorMessage(event.toolOutput.error),
-        });
+        publish();
       },
     });
 
     setPhase("updating");
+    publish();
     const output = investigationOutputSchema.parse(result.output);
     session.hypotheses = applySteering(output.hypotheses, session.steering, session.hypotheses);
 

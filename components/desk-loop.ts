@@ -111,7 +111,18 @@ function currentStep(session: PublicSession, flags: LoopFlags, pending: boolean)
     return doneIds[doneIds.length - 1] ?? "query";
   }
   if (session.approval && !flags.fresh) return "fresh";
-  if (pending) return flags.fresh ? "update" : "query";
+  if (pending) {
+    // Follow the phase that the stream already published. Catalog evidence uses
+    // the diagnostic class, so the fresh flag alone would skip ahead of the run.
+    if (session.phase === "testing") return "fresh";
+    if (session.phase === "updating") return flags.hypothesize && flags.fresh ? "update" : "hypothesize";
+    if (session.phase === "proposing_test" || session.phase === "awaiting_test_approval") return "approve";
+    if (session.phase === "awaiting_steer" && flags.hypothesize && !flags.fresh) {
+      return flags.steer ? "query" : "steer";
+    }
+    if (session.phase === "investigating" || session.phase === "ingesting") return "query";
+    return flags.fresh ? "update" : "query";
+  }
   if (flags.update) return "update";
   if (
     !flags.fresh &&
@@ -164,7 +175,14 @@ function testTitle(session: PublicSession, testId: string): string {
 
 export function deskMoment(session: PublicSession, pending: boolean): DeskMoment {
   if (pending) {
-    return { focus: "wait", title: "调查进行中", detail: "这一轮还在模型运行时里。" };
+    if (session.phase === "idle") {
+      return { focus: "wait", title: "调查进行中", detail: "正在接上这一轮。" };
+    }
+    return {
+      focus: "wait",
+      title: "调查进行中",
+      detail: `当前阶段是${PHASE_LABELS[session.phase]}。工具返回后会出现在轨迹里。`,
+    };
   }
 
   if (session.phase === "error") {

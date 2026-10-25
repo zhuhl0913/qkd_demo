@@ -20,7 +20,11 @@ pnpm dev
 
 手机走局域网 IP 时，`next.config.ts` 的 `allowedDevOrigins` 已放行 `192.168.*.*`、`10.*.*.*`、`172.16.*.*`–`172.31.*.*` 和 `*.local`。改这份名单后要重启 `pnpm dev`。不是这些形式的主机名，需要按当时的主机名再加一条。
 
-没有密钥时页面仍能打开，事件头来自公开 fixture。点击「运行调查」会返回明确错误，不会伪造工具轨迹或假设。
+没有密钥时页面仍能打开，事件头来自公开 fixture。点击「运行调查」仍是一次请求：响应是 NDJSON，先把阶段推到「装载」，再以明确错误结束。不会伪造工具轨迹或假设。
+
+有密钥时，同一次请求会在模型还在跑的时候陆续推送阶段和工具轨迹，右侧轨迹逐条出现，阶段不会停在「空闲」。结束后仍停在「批准诊断」（或当前等价状态）。排除、优先、请求证据和批准诊断仍是这一轮之外的操作。
+
+本地核对 SiliconFlow：把 `.env.local` 配成 `AI_PROVIDER=openai-compatible`、`AI_BASE_URL`（例如 `https://api.siliconflow.cn/v1`）、`AI_API_KEY` 和 `AI_MODEL`，运行 `pnpm dev`，打开端口 3457。点一次「运行调查」。阶段文字应从「空闲」变为「装载」「调查」，工具轨迹随每次工具返回增加，最后出现假设和「批准诊断」。不要把这一轮拆成多次点击。
 
 ## 环境变量
 
@@ -43,7 +47,7 @@ pnpm typecheck
 ## 目录
 
 ```text
-app/api/agent/route.ts          单次调查：工具循环 + structured hypotheses
+app/api/agent/route.ts          单次调查：NDJSON 推送阶段和工具轨迹，结束时给假设
 app/api/session/route.ts        读取 / 重置 / 结束
 app/api/steer/route.ts          排除、优先、请求一类证据
 app/api/diagnostic/route.ts     批准或拒绝诊断（服务器标记）
