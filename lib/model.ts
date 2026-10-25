@@ -20,9 +20,9 @@ export function readModelConfig(): ModelConfig {
   const baseURL = (process.env.AI_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "").trim() || null;
   const openaiApi = process.env.AI_OPENAI_API === "chat" ? "chat" : "responses";
   const providerName = (process.env.AI_PROVIDER_NAME ?? "openai-compatible").trim();
-  // Kept on so the final structured object can use json_schema. Tool steps
-  // must not send that format; lib/investigation-loop.ts strips it until
-  // environment tools have returned.
+  // OpenAI can use json_schema on the final answer. Tool steps never send it.
+  // openai-compatible final steps also skip it: SiliconFlow DeepSeek V3 does
+  // not implement JSON mode, and thinking mode then leaves content empty.
   const supportsStructuredOutputs = process.env.AI_SUPPORTS_STRUCTURED_OUTPUTS !== "false";
   return {
     provider,
