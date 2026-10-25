@@ -130,13 +130,13 @@ export function InvestigationDesk() {
   const strayBanner = banner && banner !== session?.error ? banner : null;
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-4 sm:px-6">
-      <header className="flex items-start justify-between gap-3">
+    <main className="nw mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-6">
+      <header className="flex items-start justify-between gap-3 border-b border-[var(--nw-line)] pb-4">
         <div className="min-w-0">
-          <p className="text-xs text-stone-500">事件调查台</p>
-          <h1 className="truncate text-lg font-semibold">{session?.incident.title ?? "合成 QKD 运维事件"}</h1>
+          <p className="nw-kicker">事件调查台</p>
+          <h1 className="truncate text-lg font-medium">{session?.incident.title ?? "合成 QKD 运维事件"}</h1>
           {session ? (
-            <p className="text-sm text-stone-600">
+            <p className="nw-muted text-sm">
               {session.incident.severity} · {session.incident.nodes.linkId} · {session.incident.nodes.alice} →{" "}
               {session.incident.nodes.bob}
             </p>
@@ -161,7 +161,7 @@ export function InvestigationDesk() {
         </div>
       </header>
 
-      {session ? <p className="text-xs leading-5 text-stone-600">{session.incident.disclaimer}</p> : null}
+      {session ? <p className="nw-faint text-xs leading-5">{session.incident.disclaimer}</p> : null}
       {strayBanner ? <Alert>{strayBanner}</Alert> : null}
       {loadError ? <Alert>{loadError}</Alert> : null}
 
@@ -232,11 +232,11 @@ function PrimaryZone({
   const runLabel = pending ? "调查进行中" : focus === "rerun" ? "再运行调查" : "运行调查";
   const showRun = Boolean(session) && (focus === "run" || focus === "rerun" || (focus === "wait" && pending));
   return (
-    <section className="border border-stone-300 bg-white p-4 sm:p-5" aria-live="polite" data-desk-focus={focus}>
+    <section className="nw-panel p-4 sm:p-5" aria-live="polite" data-desk-focus={focus}>
       <LoopTrack steps={steps} />
-      <p className="mt-4 text-sm text-stone-500">{PHASE_LABELS[phase]}</p>
-      <h2 className="mt-1 text-2xl font-semibold tracking-tight">{title}</h2>
-      {detail ? <p className="mt-2 max-w-xl text-sm leading-6 text-stone-700">{detail}</p> : null}
+      <p className="nw-faint mt-4 text-sm">{PHASE_LABELS[phase]}</p>
+      <h2 className="mt-1 text-2xl font-medium tracking-tight">{title}</h2>
+      {detail ? <p className="nw-muted mt-2 max-w-xl text-sm leading-6">{detail}</p> : null}
       {showApprove && session ? (
         <ApproveDock session={session} pending={pending} testId={testId} onTestId={onTestId} onApprove={onApprove} onReject={onReject} />
       ) : null}
@@ -278,20 +278,20 @@ function ApproveDock({
     ? (catalog.find((item) => item.testId === proposal.testId)?.title ?? proposal.testId)
     : "";
   return (
-    <div className="mt-4 border border-stone-900 p-3" aria-label="诊断批准">
+    <div className="mt-4 border border-[var(--nw-pop)] bg-[var(--nw-panel-2)] p-3" aria-label="诊断批准">
       {proposal ? (
         <p className="text-sm">
           <span className="font-medium">{proposalTitle}</span>
-          <span className="mt-1 block text-stone-700">{proposal.reason}</span>
+          <span className="nw-muted mt-1 block">{proposal.reason}</span>
         </p>
       ) : (
-        <p className="text-sm text-stone-600">还没有提案。</p>
+        <p className="nw-muted text-sm">还没有提案。</p>
       )}
       <label className="mt-3 flex flex-col gap-1 text-sm" htmlFor="diagnostic-select">
         测试
         <select
           id="diagnostic-select"
-          className="border border-stone-400 bg-white px-2 py-2"
+          className="px-2 py-2"
           value={testId}
           disabled={catalog.length === 0 || pending}
           onChange={(event) => onTestId(event.target.value)}
@@ -303,9 +303,9 @@ function ApproveDock({
           ))}
         </select>
       </label>
-      {selected ? <p className="mt-2 text-sm text-stone-700">{selected.measures}</p> : null}
+      {selected ? <p className="nw-muted mt-2 text-sm">{selected.measures}</p> : null}
       {proposal && selected && proposal.testId !== selected.testId ? (
-        <p className="mt-2 text-sm text-stone-600">当前选择是「{selected.title}」，提案是「{proposalTitle}」。</p>
+        <p className="nw-faint mt-2 text-sm">当前选择是「{selected.title}」，提案是「{proposalTitle}」。</p>
       ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <DeskButton tone="primary" className="px-4 py-3 text-base" disabled={pending || !testId} onClick={onApprove}>
@@ -338,7 +338,7 @@ function HypothesisBoard({
   const hypotheses = session.hypotheses;
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium text-stone-700">假设</h2>
+      <h2 className="nw-muted text-sm font-medium">假设</h2>
       <RequestRow session={session} pending={pending} onRequest={onRequest} />
       <ul className="flex flex-col gap-3">
         {hypotheses.map((item) => (
@@ -383,11 +383,10 @@ function HypothesisCard({
   return (
     <li
       className={cx(
-        "border bg-white p-3",
-        marked && "desk-new border-amber-800",
-        !marked && item.status === "priority" && "border-amber-800",
-        !marked && item.status !== "priority" && "border-stone-300",
-        item.status === "excluded" && "opacity-70",
+        "nw-panel p-3",
+        marked && "desk-new border-[var(--nw-pop)]",
+        !marked && item.status === "priority" && "border-[var(--nw-pop)]",
+        item.status === "excluded" && "opacity-55",
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -395,14 +394,14 @@ function HypothesisCard({
         <StatusBadge status={item.status} />
       </div>
       {change ? (
-        <p className="mt-2 text-sm text-amber-950">
+        <p className="nw-pop-text mt-2 text-sm">
           {STATUS_LABEL[change.from]} → {STATUS_LABEL[change.to]}
         </p>
       ) : null}
-      {isNew ? <p className="mt-2 text-sm text-amber-950">新假设</p> : null}
-      {!isNew && !change && textChanged ? <p className="mt-2 text-sm text-amber-950">依据已更新</p> : null}
+      {isNew ? <p className="nw-pop-text mt-2 text-sm">新假设</p> : null}
+      {!isNew && !change && textChanged ? <p className="nw-pop-text mt-2 text-sm">依据已更新</p> : null}
       <p className="mt-2 text-sm leading-6">{item.rationale}</p>
-      {evidenceNames.length > 0 ? <p className="mt-2 text-sm text-stone-600">依据 {evidenceNames.join("、")}</p> : null}
+      {evidenceNames.length > 0 ? <p className="nw-muted mt-2 text-sm">依据 {evidenceNames.join("、")}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <DeskButton tone="quiet" disabled={pending || item.status === "excluded"} onClick={onExclude}>
           排除
@@ -435,7 +434,7 @@ function RequestRow({
         ))}
       </div>
       {latest?.evidenceClass ? (
-        <p className="text-sm text-stone-600">下一次查证会先看{EVIDENCE_CLASS_LABEL[latest.evidenceClass]}。</p>
+        <p className="nw-muted text-sm">下一次查证会先看{EVIDENCE_CLASS_LABEL[latest.evidenceClass]}。</p>
       ) : null}
     </div>
   );
@@ -447,7 +446,7 @@ function EvidenceBoard({ session, highlight }: { session: PublicSession | null; 
   const fresh = new Set([...(highlight?.evidenceIds ?? []), ...(highlight?.updatedEvidenceIds ?? [])]);
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium text-stone-700">证据</h2>
+      <h2 className="nw-muted text-sm font-medium">证据</h2>
       <ul className="flex flex-col gap-3">
           {evidence.map((item) => {
             const isFresh = fresh.has(item.evidenceId);
@@ -456,22 +455,22 @@ function EvidenceBoard({ session, highlight }: { session: PublicSession | null; 
             return (
               <li
                 key={item.evidenceId}
-                className={cx("border bg-white p-3", isFresh ? "desk-new border-amber-800" : "border-stone-300")}
+                className={cx("nw-panel p-3", isFresh && "desk-new border-[var(--nw-pop)]")}
               >
                 <div className="flex items-start justify-between gap-3">
                   <h3 className="font-medium">{item.title}</h3>
-                  <span className="shrink-0 text-xs text-stone-500">
+                  <span className="nw-faint shrink-0 text-xs">
                     {EVIDENCE_CLASS_LABEL[item.evidenceClass]}
                     {isFresh ? (diagnostic ? " · 新证" : " · 新") : ""}
                   </span>
                 </div>
                 {long ? (
                   <details className="mt-2">
-                    <summary className="text-sm text-stone-700">{item.body.split("\n")[0]}</summary>
-                    <pre className="mt-2 text-sm text-stone-800">{item.body}</pre>
+                    <summary className="text-sm">{item.body.split("\n")[0]}</summary>
+                    <pre className="mt-2 text-sm">{item.body}</pre>
                   </details>
                 ) : (
-                  <pre className="mt-2 text-sm text-stone-800">{item.body}</pre>
+                  <pre className="mt-2 text-sm">{item.body}</pre>
                 )}
               </li>
             );
@@ -485,10 +484,10 @@ function TraceTimeline({ session, highlight }: { session: PublicSession | null; 
   const trace = session?.trace ?? [];
   const fresh = new Set(highlight?.traceIds ?? []);
   return (
-    <aside className="border border-stone-300 bg-white p-4 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-5 lg:row-start-1 lg:self-start">
-      <h2 className="text-sm font-medium">工具轨迹</h2>
+    <aside className="nw-panel p-4 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-5 lg:row-start-1 lg:self-start">
+      <h2 className="nw-muted text-sm font-medium">工具轨迹</h2>
       {trace.length === 0 ? (
-        <p className="mt-3 text-sm text-stone-500">还没有工具调用。</p>
+        <p className="nw-faint mt-3 text-sm">还没有工具调用。</p>
       ) : (
         <ol className="mt-4" aria-label="工具轨迹">
           {trace.map((event, index) => {
@@ -498,15 +497,15 @@ function TraceTimeline({ session, highlight }: { session: PublicSession | null; 
             return (
               <li key={event.id} className="relative flex gap-3 pb-5 last:pb-0">
                 {index < trace.length - 1 ? (
-                  <span aria-hidden="true" className="absolute top-3 bottom-0 left-[5px] w-px bg-stone-300" />
+                  <span aria-hidden="true" className="nw-rule-wait absolute top-3 bottom-0 left-[5px] w-px" />
                 ) : null}
                 <span
                   aria-hidden="true"
                   className={cx(
-                    "relative z-10 mt-1 h-3 w-3 shrink-0 rounded-full border-2",
-                    failed && "border-red-700 bg-red-700",
-                    !failed && isNew && "border-amber-800 bg-amber-400",
-                    !failed && !isNew && "border-stone-800 bg-white",
+                    "relative z-10 mt-1 h-2.5 w-2.5 shrink-0 rounded-full border",
+                    failed && "border-[var(--nw-pop)] bg-[var(--nw-pop)]",
+                    !failed && isNew && "border-[var(--nw-pop)] bg-transparent",
+                    !failed && !isNew && "border-[var(--nw-line-strong)] bg-transparent",
                   )}
                 />
                 <div className={cx("min-w-0", isNew && "desk-new px-2 py-1")}>
@@ -514,14 +513,14 @@ function TraceTimeline({ session, highlight }: { session: PublicSession | null; 
                     {toolLabel(event.toolName)}
                     {isNew ? " · 新" : ""}
                   </p>
-                  <p className={cx("text-xs", failed ? "text-red-800" : "text-stone-500")}>
+                  <p className={cx("text-xs", failed ? "nw-pop-text" : "nw-faint")}>
                     {failed ? "失败" : "成功"} · {shortTime(event.at)}
                   </p>
-                  {summary ? <p className="mt-1 text-sm text-stone-700">{summary}</p> : null}
-                  {failed ? <p className="mt-1 text-sm text-red-800">{event.error}</p> : null}
+                  {summary ? <p className="nw-muted mt-1 text-sm">{summary}</p> : null}
+                  {failed ? <p className="nw-pop-text mt-1 text-sm">{event.error}</p> : null}
                   <details className="mt-1">
-                    <summary className="text-xs text-stone-500">原始输入输出</summary>
-                    <p className="mt-2 font-mono text-xs text-stone-500">{event.toolName}</p>
+                    <summary className="nw-faint text-xs">原始输入输出</summary>
+                    <p className="nw-faint mt-2 font-mono text-xs">{event.toolName}</p>
                     <pre className="mt-1 text-xs">{JSON.stringify(event.input, null, 2)}</pre>
                     {event.status === "ok" ? <pre className="mt-2 text-xs">{JSON.stringify(event.output, null, 2)}</pre> : null}
                   </details>
@@ -544,13 +543,13 @@ function LoopTrack({ steps }: { steps: LoopStepView[] }) {
         return (
           <li key={step.id} className="flex min-w-0 flex-1 flex-col items-center gap-1">
             <div className="flex w-full items-center">
-              <span aria-hidden="true" className={cx("h-px flex-1", index === 0 ? "bg-transparent" : previousDone ? "bg-stone-800" : "bg-stone-300")} />
+              <span aria-hidden="true" className={cx("h-px flex-1", index === 0 ? "bg-transparent" : previousDone ? "nw-rule-done" : "nw-rule-wait")} />
               <span
                 className={cx(
-                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs",
-                  step.mark === "current" && "bg-stone-900 text-white",
-                  step.mark === "done" && "border border-stone-900 bg-white text-stone-900",
-                  step.mark === "upcoming" && "border border-stone-300 bg-white text-stone-400",
+                  "nw-step",
+                  step.mark === "current" && "nw-step-current",
+                  step.mark === "done" && "nw-step-done",
+                  step.mark === "upcoming" && "nw-step-upcoming",
                 )}
                 aria-current={step.mark === "current" ? "step" : undefined}
               >
@@ -558,10 +557,10 @@ function LoopTrack({ steps }: { steps: LoopStepView[] }) {
               </span>
               <span
                 aria-hidden="true"
-                className={cx("h-px flex-1", index === steps.length - 1 ? "bg-transparent" : nextFilled ? "bg-stone-800" : "bg-stone-300")}
+                className={cx("h-px flex-1", index === steps.length - 1 ? "bg-transparent" : nextFilled ? "nw-rule-done" : "nw-rule-wait")}
               />
             </div>
-            <span className={cx("text-center text-xs", step.mark === "current" ? "font-medium text-stone-900" : "text-stone-500")}>
+            <span className={cx("text-center text-xs", step.mark === "current" ? "font-medium text-[var(--nw-text)]" : "nw-faint")}>
               {step.label}
             </span>
           </li>
@@ -573,8 +572,8 @@ function LoopTrack({ steps }: { steps: LoopStepView[] }) {
 
 function PhaseDetails({ phase, trail }: { phase: Phase; trail: Phase[] }) {
   return (
-    <details className="border border-stone-300 bg-white px-3 py-2">
-      <summary className="text-sm text-stone-700">状态机 · {PHASE_LABELS[phase]}</summary>
+    <details className="nw-panel px-3 py-2">
+      <summary className="nw-muted text-sm">状态机 · {PHASE_LABELS[phase]}</summary>
       <ol className="mt-3 flex flex-col" data-phase={phase}>
         {PHASES.map((item) => {
           const active = item === phase;
@@ -582,15 +581,18 @@ function PhaseDetails({ phase, trail }: { phase: Phase; trail: Phase[] }) {
             <li key={item} className="flex items-center gap-2 py-1 text-sm" aria-current={active ? "step" : undefined}>
               <span
                 aria-hidden="true"
-                className={cx("h-2.5 w-2.5 shrink-0 rounded-full", active ? "bg-stone-900" : "border border-stone-400 bg-white")}
+                className={cx(
+                  "h-2 w-2 shrink-0 rounded-full",
+                  active ? "bg-[var(--nw-pop)]" : "border border-[var(--nw-line-strong)]",
+                )}
               />
-              <span className={active ? "font-medium" : "text-stone-500"}>{PHASE_LABELS[item]}</span>
-              <span className="font-mono text-xs text-stone-400">{item}</span>
+              <span className={active ? "font-medium" : "nw-faint"}>{PHASE_LABELS[item]}</span>
+              <span className="nw-faint font-mono text-xs">{item}</span>
             </li>
           );
         })}
       </ol>
-      <p className="mt-2 text-xs text-stone-500">经过：{trail.map((item) => PHASE_LABELS[item]).join(" → ")}</p>
+      <p className="nw-faint mt-2 text-xs">经过：{trail.map((item) => PHASE_LABELS[item]).join(" → ")}</p>
     </details>
   );
 }
@@ -598,8 +600,8 @@ function PhaseDetails({ phase, trail }: { phase: Phase; trail: Phase[] }) {
 function IncidentDetails({ session }: { session: PublicSession }) {
   const incident = session.incident;
   return (
-    <details className="border border-stone-300 bg-white px-3 py-2">
-      <summary className="text-sm text-stone-700">事件</summary>
+    <details className="nw-panel px-3 py-2">
+      <summary className="nw-muted text-sm">事件</summary>
       <div className="mt-2 flex flex-col gap-1 text-sm">
         <p>{incident.symptoms.join("；")}</p>
         <p>
@@ -618,10 +620,9 @@ function StatusBadge({ status }: { status: HypothesisStatus }) {
   return (
     <span
       className={cx(
-        "shrink-0 px-2 py-0.5 text-xs",
-        status === "priority" && "border border-amber-800 bg-amber-100",
-        status === "excluded" && "border border-stone-300 bg-stone-100 text-stone-500",
-        status === "active" && "border border-stone-400 bg-white",
+        "nw-badge",
+        status === "priority" && "nw-badge-priority",
+        status === "excluded" && "nw-badge-excluded",
       )}
     >
       {STATUS_LABEL[status]}
@@ -639,15 +640,7 @@ function DeskButton({
     <button
       {...props}
       type="button"
-      className={cx(
-        "inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm",
-        "cursor-pointer hover:bg-stone-100 active:bg-stone-200",
-        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
-        tone === "primary" &&
-          "border border-stone-900 bg-stone-900 text-white hover:bg-stone-800 active:bg-black disabled:hover:bg-stone-900",
-        tone === "quiet" && "border border-stone-300 bg-white text-stone-900",
-        className,
-      )}
+      className={cx("nw-btn px-3 py-2 text-sm", tone === "primary" && "nw-btn-primary", className)}
     >
       {children}
     </button>
@@ -665,7 +658,7 @@ function ResetMark() {
 
 function Alert({ children }: { children: ReactNode }) {
   return (
-    <p className="border border-red-700 bg-red-50 px-3 py-2 text-sm text-red-900" role="alert">
+    <p className="nw-alert" role="alert">
       {children}
     </p>
   );

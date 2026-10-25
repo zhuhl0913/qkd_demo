@@ -1,16 +1,31 @@
 @import "tailwindcss";
 
+:root {
+  --nw-bg: #0c100e;
+  --nw-panel: #121816;
+  --nw-panel-2: #18201c;
+  --nw-line: #24302c;
+  --nw-line-strong: #3c4c46;
+  --nw-text: #e7eeea;
+  --nw-muted: #8e9b95;
+  --nw-faint: #5e6c66;
+  --nw-pop: #e06a58;
+  --nw-ok: #7f9a86;
+}
+
 body {
   margin: 0;
-  background: #f4f1ea;
-  color: #1c1917;
+  background: var(--nw-bg);
+  color: var(--nw-text);
   font-family: ui-sans-serif, system-ui, sans-serif;
+  color-scheme: dark;
 }
 
 button,
 select,
 summary {
   font: inherit;
+  color: inherit;
 }
 
 summary {
@@ -20,21 +35,151 @@ summary {
 pre {
   white-space: pre-wrap;
   word-break: break-word;
+  color: var(--nw-muted);
+}
+
+.nw-kicker {
+  color: var(--nw-faint);
+  font-size: 12px;
+}
+
+.nw-muted {
+  color: var(--nw-muted);
+}
+
+.nw-faint {
+  color: var(--nw-faint);
+}
+
+.nw-panel {
+  background: var(--nw-panel);
+  border: 1px solid var(--nw-line);
+}
+
+.nw-pop-text {
+  color: var(--nw-pop);
+}
+
+.nw select {
+  background: var(--nw-panel-2);
+  color: var(--nw-text);
+  border: 1px solid var(--nw-line);
+}
+
+.nw button:focus-visible,
+.nw select:focus-visible,
+.nw summary:focus-visible {
+  outline: 1px solid var(--nw-pop);
+  outline-offset: 2px;
+}
+
+.nw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border: 1px solid var(--nw-line);
+  background: transparent;
+  color: var(--nw-text);
+  cursor: pointer;
+}
+
+.nw-btn:hover {
+  background: var(--nw-panel-2);
+}
+
+.nw-btn:active {
+  background: #101612;
+}
+
+.nw-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.nw-btn:disabled:hover {
+  background: transparent;
+}
+
+.nw-btn-primary {
+  border-color: var(--nw-line-strong);
+  background: var(--nw-panel-2);
+}
+
+.nw-btn-primary:hover {
+  border-color: var(--nw-text);
+}
+
+.nw-btn-primary:disabled:hover {
+  background: var(--nw-panel-2);
+  border-color: var(--nw-line-strong);
+}
+
+.nw-step {
+  display: flex;
+  height: 1.75rem;
+  width: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.nw-step-current {
+  border: 1px solid var(--nw-pop);
+  background: #1c1412;
+  color: var(--nw-text);
+}
+
+.nw-step-done {
+  border: 1px solid var(--nw-line-strong);
+  background: transparent;
+  color: var(--nw-ok);
+}
+
+.nw-step-upcoming {
+  border: 1px solid var(--nw-line);
+  background: transparent;
+  color: var(--nw-faint);
+}
+
+.nw-rule-done {
+  background: var(--nw-line-strong);
+}
+
+.nw-rule-wait {
+  background: var(--nw-line);
+}
+
+.nw-badge {
+  flex-shrink: 0;
+  border: 1px solid var(--nw-line);
+  padding: 0.125rem 0.5rem;
+  font-size: 12px;
+  color: var(--nw-muted);
+}
+
+.nw-badge-priority {
+  border-color: var(--nw-pop);
+  color: var(--nw-pop);
+}
+
+.nw-badge-excluded {
+  color: var(--nw-faint);
+}
+
+.nw-alert {
+  border: 1px solid var(--nw-pop);
+  background: #1a1210;
+  color: #f0c2ba;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
 }
 
 .desk-new {
-  box-shadow: inset 3px 0 0 #b45309;
-  background-color: #fffbeb;
-  animation: desk-flash 1.2s ease-out 1;
-}
-
-@keyframes desk-flash {
-  from {
-    background-color: #fcd34d;
-  }
-  to {
-    background-color: #fffbeb;
-  }
+  box-shadow: inset 2px 0 0 var(--nw-pop);
+  background-color: #1a1614;
 }
 
 @media (prefers-reduced-motion: reduce) {
