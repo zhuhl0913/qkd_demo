@@ -10,11 +10,10 @@
 
 ```bash
 pnpm install
-cp .env.example .env.local
 pnpm dev
 ```
 
-`.env.example` 在导出时被省略；需要的变量已写在下面「环境变量」一节，可自行写入 `.env.local`。
+要真跑模型，在项目根目录新建 `.env.local`，按下面「环境变量」一节填入变量。不填也能打开页面和教程。
 
 开发服务器固定在端口 **3457**。打开 Next 打印的地址，一般是 [http://127.0.0.1:3457](http://127.0.0.1:3457)。
 
@@ -48,7 +47,7 @@ pnpm dev
 
 ## 环境变量
 
-见 `.env.example`。
+写在项目根目录的 `.env.local`（不进 git）。
 
 - `AI_PROVIDER=openai`：使用 `@ai-sdk/openai`。`AI_OPENAI_API=responses` 走 Responses API；`chat` 走 Chat Completions（兼容端点只有 `/chat/completions` 时用这个）。
 - `AI_PROVIDER=openai-compatible`：使用 `@ai-sdk/openai-compatible`，必须设置 `AI_BASE_URL`。

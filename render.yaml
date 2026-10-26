@@ -1,0 +1,13 @@
+# Render Blueprint: public tutorial/replay demo.
+# No AI key is configured here on purpose; "运行调查" surfaces a missing-key error.
+services:
+  - type: web
+    name: qkd-demo
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm exec next start -H 0.0.0.0 -p $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
