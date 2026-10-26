@@ -1,7 +1,7 @@
 {
   "id": "qber-rise-keyrate-drop",
   "title": "QBER 上升且筛选后密钥率下降",
-  "disclaimer": "合成演练数据。不是国盾量子（QuantumCTek）真机，不是现网链路，也不是商业密钥率。QKD 字段只是场景皮肤，不代表协议实现。",
+  "disclaimer": "合成演练数据。不是真实设备，不是现网链路，也不是商业密钥率。QKD 字段只是场景皮肤，不代表协议实现。",
   "severity": "sev-2",
   "openedAt": "2026-10-24T02:40:00Z",
   "timeWindow": {

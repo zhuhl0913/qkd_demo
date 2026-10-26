@@ -14,7 +14,7 @@ function session(patch: Partial<PublicSession> = {}): PublicSession {
     incident: {
       id: "qber-rise-keyrate-drop",
       title: "QBER 上升且筛选后密钥率下降",
-      disclaimer: "合成演练数据。不是国盾量子真机，也不是现网链路。",
+      disclaimer: "合成演练数据。不是真实设备，也不是现网链路。",
       severity: "sev-2",
       openedAt: "2026-10-24T02:40:00Z",
       timeWindow: { from: "2026-10-24T00:00:00Z", to: "2026-10-24T03:00:00Z" },
@@ -139,7 +139,7 @@ const handoff = buildInvestigationReport(updated, { generatedAt: "2026-10-25T01:
 assert.match(handoff, /^# 调查报告/);
 assert.match(handoff, /QBER 上升且筛选后密钥率下降/);
 assert.match(handoff, /合成演练数据/);
-assert.match(handoff, /不是国盾量子真机/);
+assert.match(handoff, /不是真实设备/);
 assert.match(handoff, /时间窗：10-24 00:00:00Z – 10-24 03:00:00Z/);
 assert.match(handoff, /LN-17（NODE-A-HZ-04 → NODE-B-SH-11）/);
 assert.match(handoff, /CHG-4418/);

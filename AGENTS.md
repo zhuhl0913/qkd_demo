@@ -30,7 +30,7 @@ Open the URL Next prints (dev server is pinned to port **3457**). Copy `.env.exa
 2. No fake tool logs / no UI that pretends tools ran without calling the model runtime.
 3. Single Agent only — no multi-agent orchestration in V1. One `ToolLoopAgent` in `lib/agent.ts`.
 4. Do not implement BB84 or other QKD *protocols*; QKD is scenario skin/data only.
-5. Never claim real QuantumCTek hardware, live links, or commercial key rates.
+5. Never claim real vendor hardware, live links, or commercial key rates.
 6. Do not commit unpublished research (JIT / TraceWeave) source.
 
 ## Plan discipline
