@@ -320,6 +320,15 @@ export function changeChips(diff: DeskDiff): string[] {
   return chips;
 }
 
+export function formatOffset(deltaMs: number): string {
+  const seconds = Math.max(0, deltaMs) / 1000;
+  if (seconds < 10) {
+    const rounded = Math.round(seconds * 10) / 10;
+    return `+${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}s`;
+  }
+  return `+${Math.round(seconds)}s`;
+}
+
 export function shortTime(iso: string): string {
   if (!iso) return "";
   const date = new Date(iso);

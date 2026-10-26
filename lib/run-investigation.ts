@@ -33,7 +33,15 @@ export type InvestigationRunResult = { ok: true } | { ok: false; error: string }
 export type InvestigationRunOptions = {
   /** Public session snapshot after a phase change or a finished tool call. */
   onProgress?: (session: PublicSession) => void;
+  /** Client disconnect or desk pause. Leaves the public session on the last phase. */
+  signal?: AbortSignal;
 };
+
+function isAbort(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  if (!error || typeof error !== "object") return false;
+  return "name" in error && error.name === "AbortError";
+}
 
 /**
  * One investigation turn. `model` is for tests that supply a stand-in provider.
@@ -52,6 +60,7 @@ export async function runInvestigation(
   };
 
   try {
+    if (options?.signal?.aborted) return { ok: false, error: "已暂停。" };
     setPhase("ingesting");
     publish();
     const visible = buildModelVisibleContext({
@@ -70,6 +79,7 @@ export async function runInvestigation(
 
     const agent = createInvestigationAgent(visible.instructions, languageModel);
     const result = await agent.generate({
+      abortSignal: options?.signal,
       prompt: visible.prompt,
       onToolExecutionEnd(event) {
         const at = new Date().toISOString();
@@ -149,6 +159,7 @@ export async function runInvestigation(
 
     return { ok: true };
   } catch (error) {
+    if (isAbort(error, options?.signal)) return { ok: false, error: "已暂停。" };
     session.error = errorMessage(error);
     setPhase("error");
     return { ok: false, error: session.error };

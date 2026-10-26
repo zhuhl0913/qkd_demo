@@ -6,7 +6,7 @@ import type { EvidenceClass, EvidenceItem, Hypothesis, Phase, PublicSession, Tra
  * read hidden fixtures.
  */
 
-const STEP_MS = 650;
+const STEP_MS = 1000;
 
 export const DEMO_STEP_MS = STEP_MS;
 
@@ -255,6 +255,18 @@ export function demoSteer(
     next = pushPhase(next, "awaiting_steer");
   }
   return next;
+}
+
+export function carryDemoSteer(frame: PublicSession, steered: PublicSession): PublicSession {
+  const statuses = new Map(steered.hypotheses.map((item) => [item.id, item.status]));
+  return {
+    ...frame,
+    steering: steered.steering.map((record) => ({ ...record })),
+    hypotheses: frame.hypotheses.map((item) => {
+      const status = statuses.get(item.id);
+      return status && status !== item.status ? { ...item, status } : item;
+    }),
+  };
 }
 
 export function demoConclude(session: PublicSession): PublicSession {

@@ -7,6 +7,7 @@ import {
   deskMoment,
   diffSessions,
   EVIDENCE_CLASS_LABEL,
+  formatOffset,
   shortTime,
   STATUS_LABEL,
   toolLabel,
@@ -14,6 +15,7 @@ import {
   type DeskFocus,
 } from "./desk-loop";
 import {
+  carryDemoSteer,
   DEMO_STEP_MS,
   demoApprove,
   demoConclude,
@@ -22,7 +24,9 @@ import {
   demoReject,
   demoSteer,
 } from "./demo-playback";
-import { canExportReport, downloadInvestigationReport } from "./investigation-report";
+import { interpretOperatorNote, type OperatorNote } from "./operator-note";
+import { demoRemainingMs, formatEta, liveRemainingMs, nowMs, postureCopy } from "./run-eta";
+import { canExportReport, downloadInvestigationHandoff, downloadInvestigationReport } from "./investigation-report";
 import {
   PHASE_LABELS,
   type EvidenceClass,
@@ -46,6 +50,14 @@ const EVIDENCE_REQUESTS = [
   ["logs", "日志"],
   ["maintenance", "维护"],
 ] as const;
+
+type Play = {
+  gen: number;
+  frames: PublicSession[];
+  shown: number;
+  stepStarted: number;
+  frozenInto: number;
+};
 
 const RUNNING_PHASES = new Set<Phase>(["ingesting", "investigating", "testing", "updating", "proposing_test"]);
 
@@ -83,6 +95,10 @@ export function InvestigationDesk() {
   const [highlight, setHighlight] = useState<DeskDiff | null>(null);
   const [exportNote, setExportNote] = useState<string | null>(null);
   const [demoOn, setDemoOn] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [notes, setNotes] = useState<OperatorNote[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [etaLabel, setEtaLabel] = useState<string | null>(null);
   const [selectedHypothesisId, setSelectedHypothesisId] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const [openEvidenceId, setOpenEvidenceId] = useState<string | null>(null);
@@ -93,6 +109,9 @@ export function InvestigationDesk() {
   const demoGen = useRef(0);
   const demoStartedRef = useRef(0);
   const timersRef = useRef<number[]>([]);
+  const pausedRef = useRef(false);
+  const playRef = useRef<Play | null>(null);
+  const liveStartedRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,6 +183,7 @@ export function InvestigationDesk() {
     const controller = new AbortController();
     abortRef.current?.abort();
     abortRef.current = controller;
+    liveStartedRef.current = nowMs();
     setPending(true);
     setBanner(null);
     let sawResult = false;
@@ -183,7 +203,12 @@ export function InvestigationDesk() {
         remember(event.session);
         if (event.type === "result") {
           sawResult = true;
-          setBanner(event.ok ? null : (event.error ?? "操作失败"));
+          const held = event.ok === false && event.error === "已暂停。";
+          setBanner(event.ok || held ? null : (event.error ?? "操作失败"));
+          if (held) {
+            pausedRef.current = true;
+            setPaused(true);
+          }
           setPending(false);
           return;
         }
@@ -199,12 +224,21 @@ export function InvestigationDesk() {
         }
       }
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        if (pausedRef.current) {
+          const recovered = await fetch("/api/session")
+            .then(async (next) => (await next.json()) as ApiBody)
+            .catch(() => null);
+          if (recovered?.session) remember(recovered.session);
+        }
+        return;
+      }
       setBanner(error instanceof Error ? error.message : "请求失败");
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       busyRef.current = false;
       setPending(false);
+      if (!pausedRef.current) setEtaLabel(null);
     }
   }
 
@@ -216,50 +250,130 @@ export function InvestigationDesk() {
   function stopDemo() {
     demoGen.current += 1;
     clearDemoTimers();
+    playRef.current = null;
     demoRef.current = false;
+    pausedRef.current = false;
     setDemoOn(false);
+    setPaused(false);
+    setNotes([]);
+    setNoteDraft("");
+    setEtaLabel(null);
     busyRef.current = false;
     setPending(false);
+    abortRef.current?.abort();
   }
 
-  function playFrames(frames: PublicSession[]) {
+  function finishPlay() {
+    playRef.current = null;
+    busyRef.current = false;
+    setPending(false);
+    setEtaLabel(null);
+  }
+
+  function arm(delay: number) {
+    const play = playRef.current;
+    if (!play) return;
+    clearDemoTimers();
+    const gen = play.gen;
+    const id = window.setTimeout(() => {
+      if (demoGen.current !== gen || pausedRef.current) return;
+      const current = playRef.current;
+      if (!current || current.gen !== gen) return;
+      const frame = current.frames[current.shown];
+      if (!frame) {
+        finishPlay();
+        return;
+      }
+      remember(frame);
+      current.shown += 1;
+      current.stepStarted = nowMs();
+      current.frozenInto = 0;
+      if (current.shown >= current.frames.length) finishPlay();
+      else arm(DEMO_STEP_MS);
+    }, delay);
+    timersRef.current = [id];
+  }
+
+  function beginPlay(frames: PublicSession[]) {
     clearDemoTimers();
     const gen = ++demoGen.current;
     demoRef.current = true;
+    pausedRef.current = false;
     setDemoOn(true);
+    setPaused(false);
     busyRef.current = true;
     setPending(true);
     setBanner(null);
-    timersRef.current = frames.map((frame, index) =>
-      window.setTimeout(() => {
-        if (demoGen.current !== gen) return;
-        remember(frame);
-        if (index === frames.length - 1) {
-          busyRef.current = false;
-          setPending(false);
-        }
-      }, index * DEMO_STEP_MS),
-    );
+    playRef.current = { gen, frames, shown: 0, stepStarted: nowMs(), frozenInto: 0 };
+    setEtaLabel(formatEta(demoRemainingMs(frames.length, 0, 0)));
+    arm(0);
+  }
+
+  function rememberSteer(next: PublicSession) {
+    const play = playRef.current;
+    if (play) {
+      play.frames = play.frames.map((frame, index) => (index >= play.shown ? carryDemoSteer(frame, next) : frame));
+    }
+    remember(next);
   }
 
   // Synthetic playback. Frames use the same PublicSession shape as the NDJSON stream.
   function playOpening() {
     const base = sessionRef.current;
-    if (!base || busyRef.current) return;
-    demoStartedRef.current = Date.now();
+    if (!base || busyRef.current || pausedRef.current) return;
+    demoStartedRef.current = nowMs();
     setSelectedHypothesisId(null);
     setSelectedEvidenceId(null);
     setOpenEvidenceId(null);
-    playFrames(demoOpening(base, demoStartedRef.current));
+    setNotes([]);
+    beginPlay(demoOpening(base, demoStartedRef.current));
   }
 
   function playEpilogue() {
     const base = sessionRef.current;
     if (!base || busyRef.current || !demoRef.current || !base.approval) return;
-    playFrames(demoEpilogue(base, demoStartedRef.current || Date.now()));
+    beginPlay(demoEpilogue(base, demoStartedRef.current || nowMs()));
+  }
+
+  function onPause() {
+    const play = playRef.current;
+    if (demoRef.current && play && play.shown < play.frames.length) {
+      pausedRef.current = true;
+      setPaused(true);
+      play.frozenInto = nowMs() - play.stepStarted;
+      clearDemoTimers();
+      busyRef.current = false;
+      setPending(false);
+      setEtaLabel(`${formatEta(demoRemainingMs(play.frames.length, play.shown, play.frozenInto))} · 已暂停`);
+      return;
+    }
+    if (!abortRef.current) return;
+    pausedRef.current = true;
+    setPaused(true);
+    abortRef.current.abort();
+    busyRef.current = false;
+    setPending(false);
+  }
+
+  function onResume() {
+    if (!pausedRef.current) return;
+    const play = playRef.current;
+    if (demoRef.current && play && play.shown < play.frames.length) {
+      pausedRef.current = false;
+      setPaused(false);
+      busyRef.current = true;
+      setPending(true);
+      play.stepStarted = nowMs();
+      arm(play.shown === 0 ? 0 : DEMO_STEP_MS);
+      return;
+    }
+    pausedRef.current = false;
+    setPaused(false);
+    void runInvestigationStream();
   }
 
   function onRun() {
+    if (pausedRef.current) return;
     if (demoRef.current) {
       if (sessionRef.current?.approval) playEpilogue();
       return;
@@ -269,31 +383,34 @@ export function InvestigationDesk() {
 
   function onExclude(hypothesisId: string) {
     const current = sessionRef.current;
-    if (!current || busyRef.current) return;
+    if (!current) return;
     if (demoRef.current) {
-      remember(demoSteer(current, { action: "exclude", hypothesisId, at: new Date().toISOString() }));
+      rememberSteer(demoSteer(current, { action: "exclude", hypothesisId, at: new Date().toISOString() }));
       return;
     }
+    if (busyRef.current) return;
     void run(() => postJson("/api/steer", { action: "exclude", hypothesisId }));
   }
 
   function onPrioritize(hypothesisId: string) {
     const current = sessionRef.current;
-    if (!current || busyRef.current) return;
+    if (!current) return;
     if (demoRef.current) {
-      remember(demoSteer(current, { action: "prioritize", hypothesisId, at: new Date().toISOString() }));
+      rememberSteer(demoSteer(current, { action: "prioritize", hypothesisId, at: new Date().toISOString() }));
       return;
     }
+    if (busyRef.current) return;
     void run(() => postJson("/api/steer", { action: "prioritize", hypothesisId }));
   }
 
   function onRequest(evidenceClass: "telemetry" | "logs" | "maintenance") {
     const current = sessionRef.current;
-    if (!current || busyRef.current) return;
+    if (!current) return;
     if (demoRef.current) {
-      remember(demoSteer(current, { action: "request_evidence", evidenceClass, at: new Date().toISOString() }));
+      rememberSteer(demoSteer(current, { action: "request_evidence", evidenceClass, at: new Date().toISOString() }));
       return;
     }
+    if (busyRef.current) return;
     void run(() => postJson("/api/steer", { action: "request_evidence", evidenceClass }));
   }
 
@@ -329,6 +446,35 @@ export function InvestigationDesk() {
     void run(() => postJson("/api/session", { action: "conclude" }));
   }
 
+  function onNote(raw: string) {
+    const current = sessionRef.current;
+    if (!current) return;
+    const interpreted = interpretOperatorNote(raw, current, selectedHypothesisId);
+    if (!interpreted) return;
+    let effect = interpreted.effect;
+    let detail = interpreted.detail;
+    const heldForLiveRun = effect !== "note" && !demoRef.current && busyRef.current;
+    if (heldForLiveRun) {
+      effect = "note";
+      detail = "已记下。";
+    } else if (effect === "exclude" && interpreted.hypothesisId) onExclude(interpreted.hypothesisId);
+    else if (effect === "prioritize" && interpreted.hypothesisId) onPrioritize(interpreted.hypothesisId);
+    else if (effect === "request_evidence" && interpreted.evidenceClass) onRequest(interpreted.evidenceClass);
+    setNotes((currentNotes) => [
+      ...currentNotes,
+      {
+        id: `note-${currentNotes.length + 1}`,
+        at: new Date().toISOString(),
+        text: interpreted.text,
+        effect,
+        detail,
+        hypothesisId: heldForLiveRun ? undefined : interpreted.hypothesisId,
+        evidenceClass: heldForLiveRun ? undefined : interpreted.evidenceClass,
+      },
+    ]);
+    setNoteDraft("");
+  }
+
   function onReset() {
     stopDemo();
     void run(() => postJson("/api/session", { action: "reset" }));
@@ -355,6 +501,26 @@ export function InvestigationDesk() {
       abortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!pending && !paused) return;
+    const id = window.setInterval(() => {
+      const play = playRef.current;
+      const started = liveStartedRef.current;
+      const currentPhase = sessionRef.current?.phase ?? "investigating";
+      if (play) {
+        const into = pausedRef.current ? play.frozenInto : nowMs() - play.stepStarted;
+        const label = formatEta(demoRemainingMs(play.frames.length, play.shown, into));
+        setEtaLabel(pausedRef.current ? `${label} · 已暂停` : label);
+        return;
+      }
+      if (pending && started && !pausedRef.current) {
+        const remaining = liveRemainingMs(currentPhase === "idle" ? "investigating" : currentPhase, nowMs() - started);
+        setEtaLabel(remaining == null ? null : formatEta(remaining));
+      }
+    }, 400);
+    return () => window.clearInterval(id);
+  }, [pending, paused]);
 
   const phase: Phase = session?.phase ?? "idle";
   const moment = session
@@ -383,6 +549,10 @@ export function InvestigationDesk() {
   );
   const awaitingApproval = phase === "awaiting_test_approval";
   const demoBlocksLiveRun = demoOn && !session?.approval;
+  const posture = postureCopy({ pending, paused, phase, focus: moment.focus });
+  const detailWithEta = etaLabel && pending ? [detail, etaLabel].filter(Boolean).join(" · ") : detail;
+  const showPause = pending && !paused;
+  const showResume = paused;
 
   return (
     <main
@@ -391,6 +561,8 @@ export function InvestigationDesk() {
       data-desk-focus={moment.focus}
       data-phase={phase}
       data-demo={demoOn ? "playback" : "off"}
+      data-paused={paused ? "true" : "false"}
+      data-posture={posture}
       aria-busy={pending}
     >
       <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b border-[var(--nw-line)] px-4 py-3">
@@ -411,7 +583,7 @@ export function InvestigationDesk() {
         <div className="flex flex-wrap gap-2">
           <DeskButton
             tone="quiet"
-            disabled={!session || pending}
+            disabled={!session || pending || paused}
             title="合成回放，不调用模型"
             data-action="demo-playback"
             onClick={playOpening}
@@ -425,11 +597,24 @@ export function InvestigationDesk() {
             data-action="export-report"
             onClick={() => {
               if (!session || !canExportReport(session)) return;
-              const fileName = downloadInvestigationReport(session);
+              const fileName = downloadInvestigationReport(session, new Date().toISOString(), notes);
               setExportNote(`已下载 ${fileName}`);
             }}
           >
-            导出报告
+            交接稿
+          </DeskButton>
+          <DeskButton
+            tone="quiet"
+            disabled={!exportReady}
+            title={exportReady ? "下载公开会话 JSON" : "无假设或证据"}
+            data-action="export-json"
+            onClick={() => {
+              if (!session || !canExportReport(session)) return;
+              const fileName = downloadInvestigationHandoff(session, new Date().toISOString(), notes);
+              setExportNote(`已下载 ${fileName}`);
+            }}
+          >
+            导出 JSON
           </DeskButton>
           <DeskButton
             tone="quiet"
@@ -444,6 +629,32 @@ export function InvestigationDesk() {
           </DeskButton>
         </div>
       </header>
+
+      <div
+        className={cx(
+          "flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2",
+          paused || awaitingApproval ? "border-[var(--nw-pop)]" : "border-[var(--nw-line)]",
+        )}
+        data-agency-strip="true"
+        data-eta={etaLabel ?? ""}
+      >
+        <p className="min-w-0 text-sm">
+          <span>{posture}</span>
+          <span className="nw-faint"> · 诊断前询问</span>
+        </p>
+        <div className="flex shrink-0 gap-2">
+          {showPause ? (
+            <DeskButton tone="quiet" data-action="pause" onClick={onPause}>
+              暂停
+            </DeskButton>
+          ) : null}
+          {showResume ? (
+            <DeskButton tone="primary" data-action="resume" onClick={onResume}>
+              继续
+            </DeskButton>
+          ) : null}
+        </div>
+      </div>
 
       {exportNote || strayBanner || loadError ? (
         <div className="flex shrink-0 flex-col gap-2 border-b border-[var(--nw-line)] px-4 py-2">
@@ -472,13 +683,13 @@ export function InvestigationDesk() {
           onPrioritize={onPrioritize}
           onRequest={onRequest}
         />
-        <TrailColumn session={session} highlight={highlight} pending={pending} phase={phase} />
+        <TrailColumn session={session} highlight={highlight} pending={pending} phase={phase} etaLabel={etaLabel} notes={notes} noteDraft={noteDraft} onDraft={setNoteDraft} onNote={onNote} />
       </div>
 
       <DecisionRail
         phase={phase}
         title={moment.title}
-        detail={detail}
+        detail={detailWithEta}
         focus={moment.focus}
         pending={pending}
         session={session}
@@ -1124,11 +1335,21 @@ function TrailColumn({
   highlight,
   pending,
   phase,
+  etaLabel,
+  notes,
+  noteDraft,
+  onDraft,
+  onNote,
 }: {
   session: PublicSession | null;
   highlight: DeskDiff | null;
   pending: boolean;
   phase: Phase;
+  etaLabel: string | null;
+  notes: OperatorNote[];
+  noteDraft: string;
+  onDraft: (value: string) => void;
+  onNote: (text: string) => void;
 }) {
   const trail = session?.phaseTrail ?? [];
   const path = trail.length > 1 ? trail.map((item) => PHASE_LABELS[item]).join(" → ") : "";
@@ -1139,6 +1360,7 @@ function TrailColumn({
         <div className="flex items-center justify-between gap-2">
           <h2 className="nw-muted text-sm font-medium">运行</h2>
           <span className="flex items-center gap-2">
+            {etaLabel ? <span className="nw-badge">{etaLabel}</span> : null}
             {count > 0 ? <span className="nw-faint font-mono text-xs">{count}</span> : null}
             <span className={cx("nw-badge", (phase === "awaiting_test_approval" || phase === "error") && "nw-badge-priority")}>
               {PHASE_LABELS[phase]}
@@ -1148,8 +1370,29 @@ function TrailColumn({
         {path ? <p className="nw-faint mt-2 text-xs leading-5">{path}</p> : null}
       </div>
       <div className="nw-scroll px-4 py-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-        <RunLog session={session} highlight={highlight} pending={pending} phase={phase} />
+        <RunLog session={session} highlight={highlight} pending={pending} phase={phase} notes={notes} />
       </div>
+      <form
+        className="flex shrink-0 gap-2 border-t border-[var(--nw-line)] px-4 py-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onNote(noteDraft);
+        }}
+      >
+        <input
+          className="min-w-0 flex-1 border border-[var(--nw-line)] bg-transparent px-2 py-1.5 text-sm"
+          value={noteDraft}
+          placeholder="记一条"
+          aria-label="操作备注"
+          title="排除、优先、看遥测、看日志、看维护，或自由备注"
+          data-action="operator-note"
+          disabled={!session}
+          onChange={(event) => onDraft(event.target.value)}
+        />
+        <DeskButton tone="quiet" disabled={!session || noteDraft.trim().length === 0} onClick={() => onNote(noteDraft)}>
+          记下
+        </DeskButton>
+      </form>
     </aside>
   );
 }
@@ -1159,22 +1402,33 @@ function RunLog({
   highlight,
   pending,
   phase,
+  notes,
 }: {
   session: PublicSession | null;
   highlight: DeskDiff | null;
   pending: boolean;
   phase: Phase;
+  notes: OperatorNote[];
 }) {
   const trace = [...(session?.trace ?? [])].sort((left, right) => left.at.localeCompare(right.at));
   const fresh = new Set(highlight?.traceIds ?? []);
   const origin = traceOrigin(trace);
   const showLive = pending && phase !== "idle";
   const showError = !pending && phase === "error" && Boolean(session?.error);
-  if (trace.length === 0 && !showLive && !showError) return null;
+  if (trace.length === 0 && notes.length === 0 && !showLive && !showError) return null;
   return (
     <ol>
       {trace.map((event) => (
         <ToolRow key={event.id} event={event} origin={origin} fresh={fresh.has(event.id)} />
+      ))}
+      {notes.map((note) => (
+        <li key={note.id} className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-2 border-b border-[var(--nw-line)] py-2.5 last:border-b-0" data-note={note.id}>
+          <span className="nw-faint pt-0.5 font-mono text-[11px]">注</span>
+          <div className="min-w-0">
+            <p className="text-sm">{note.text}</p>
+            <p className="nw-faint mt-1 text-xs">{note.detail}</p>
+          </div>
+        </li>
       ))}
       {showLive ? (
         <li className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-2 border-b border-[var(--nw-line)] py-2.5 last:border-b-0">
@@ -1254,15 +1508,6 @@ function formatStamp(at: string, origin: number | null): string {
   const time = Date.parse(at);
   if (origin === null || Number.isNaN(time)) return "—";
   return formatOffset(time - origin);
-}
-
-function formatOffset(deltaMs: number): string {
-  const seconds = Math.max(0, deltaMs) / 1000;
-  if (seconds < 10) {
-    const rounded = Math.round(seconds * 10) / 10;
-    return `+${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}s`;
-  }
-  return `+${Math.round(seconds)}s`;
 }
 
 function StatusBadge({ status }: { status: HypothesisStatus }) {
