@@ -8,6 +8,9 @@ import {
   diffSessions,
   EVIDENCE_CLASS_LABEL,
   formatOffset,
+  hasFreshEvidence,
+  latestLeg,
+  legLabel,
   shortTime,
   STATUS_LABEL,
   steerContinuesInvestigation,
@@ -687,9 +690,41 @@ export function InvestigationDesk() {
     else if (paused) posture = "教程停在这一帧";
     else if (pending) posture = "教程回放";
   }
-  const detailWithEta = etaLabel && pending ? [detail, etaLabel].filter(Boolean).join(" · ") : detail;
   const showPause = pending && !paused && tutorialStep === null;
   const showResume = paused && tutorialStep === null;
+  const diagnosed = session ? hasFreshEvidence(session) : false;
+  const keySuffix = keyNote ? "密钥未配置。" : "";
+  let railTitle = moment.title;
+  let railDetail = detail;
+  if (session && phase !== "error") {
+    if (showResume) {
+      railTitle = "已暂停";
+      railDetail = "停在当前这一步。点「继续」接着跑。";
+    } else if (pending) {
+      railDetail = [moment.detail, etaLabel].filter(Boolean).join(" · ");
+    } else if (moment.focus === "rerun" && session.approval) {
+      const approvedId = session.approval.testId;
+      const approvedName = session.diagnosticCatalog.find((item) => item.testId === approvedId)?.title ?? approvedId;
+      railTitle = `已批准「${approvedName}」`;
+      railDetail = joinCopy("点「再运行调查」执行这项测试，结果作为新证据回到假设。", keySuffix);
+    } else if (moment.focus === "steer") {
+      railTitle = diagnosed ? "诊断结果已回填" : "定方向";
+      railDetail = diagnosed
+        ? "对照中栏看假设变化。还要查就补一类证据，收尾就导出交接稿。"
+        : "在中栏排除或先查一条假设，或在这里补一类证据。";
+    } else if (moment.focus === "approve") {
+      railDetail = "批准后只跑这项诊断，不改设备。";
+    } else if (moment.focus === "done") {
+      railTitle = "调查已结束";
+      railDetail = "导出交接稿留档。要重来，点右上「重置」。";
+    } else if (moment.focus === "run") {
+      railDetail = joinCopy(
+        session.steering.length > 0 ? "转向已记下，运行后按新方向再查。" : "代理会查遥测、日志和维护记录，再给出假设。",
+        keySuffix,
+      );
+    }
+  }
+  const emphasizeExport = exportReady && !pending && (moment.focus === "done" || (moment.focus === "steer" && diagnosed));
   const tutorialApproved = Boolean(session?.approval);
   const tutorialRejected = tutorialStep === "gate" && !tutorialApproved && session?.proposal == null;
   const tutorialView = tutorialStep
@@ -713,37 +748,41 @@ export function InvestigationDesk() {
       aria-busy={pending}
     >
       <header
-        className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b border-[var(--nw-line)] px-4 py-3"
+        className="nw-bar flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5"
         inert={coachLocks ? true : undefined}
       >
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <p className="nw-kicker">事件调查台</p>
-            <h1 className="text-base font-medium">{session?.incident.title ?? "合成 QKD 运维事件"}</h1>
-            {session ? (
-              <span className="nw-faint text-xs">
-                {session.incident.severity} · {session.incident.nodes.linkId}
-              </span>
-            ) : null}
-            <span className={cx("nw-badge", awaitingApproval && "nw-badge-priority")}>{PHASE_LABELS[phase]}</span>
-            {tutorialStep ? <span className="nw-badge">教程</span> : null}
-            {demoOn && !tutorialStep ? <span className="nw-badge">合成回放</span> : null}
-          </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="flex items-center gap-2">
+            <span className="nw-mark" aria-hidden="true" />
+            <span className="nw-kicker">事件调查台</span>
+          </span>
+          <h1 className="text-[15px] font-semibold">{session?.incident.title ?? "合成 QKD 运维事件"}</h1>
+          {session ? (
+            <span className="nw-faint font-mono text-xs">
+              {session.incident.severity.toUpperCase()} · {session.incident.id}
+            </span>
+          ) : null}
+          {demoOn ? (
+            <span className="nw-badge" title="回放预制帧，不调用模型和工具">
+              合成回放
+            </span>
+          ) : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <DeskButton
-            tone="quiet"
-            disabled={!session || pending || tutorialStep !== null}
-            title="带说明的合成回放，不调用模型"
-            data-action="tutorial"
-            aria-pressed={tutorialStep !== null}
-            onClick={onTutorial}
-          >
-            教程
-          </DeskButton>
+        <div className="flex flex-wrap items-center gap-2">
+          {tutorialStep === null ? (
+            <DeskButton
+              tone="quiet"
+              disabled={!session || pending}
+              title="带说明的合成回放，不调用模型"
+              data-action="tutorial"
+              onClick={onTutorial}
+            >
+              教程
+            </DeskButton>
+          ) : null}
           <HandoffExport
             ready={exportReady}
-            emphasize={moment.focus === "done" && exportReady}
+            emphasize={emphasizeExport}
             onMarkdown={() => {
               if (!session || !canExportReport(session)) return;
               const fileName = downloadInvestigationReport(session, new Date().toISOString(), notes);
@@ -761,33 +800,6 @@ export function InvestigationDesk() {
           </DeskButton>
         </div>
       </header>
-
-      <div
-        className={cx(
-          "flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2",
-          paused || awaitingApproval ? "border-[var(--nw-pop)]" : "border-[var(--nw-line)]",
-        )}
-        data-agency-strip="true"
-        data-eta={etaLabel ?? ""}
-        inert={coachLocks ? true : undefined}
-      >
-        <p className="min-w-0 text-sm">
-          <span>{posture}</span>
-          <span className="nw-faint"> · 诊断前询问</span>
-        </p>
-        <div className="flex shrink-0 gap-2">
-          {showPause ? (
-            <DeskButton tone="quiet" data-action="pause" onClick={onPause}>
-              暂停
-            </DeskButton>
-          ) : null}
-          {showResume ? (
-            <DeskButton tone="primary" data-action="resume" onClick={onResume}>
-              继续
-            </DeskButton>
-          ) : null}
-        </div>
-      </div>
 
       {exportNote || strayBanner || loadError ? (
         <div className="flex shrink-0 flex-col gap-2 border-b border-[var(--nw-line)] px-4 py-2" inert={coachLocks ? true : undefined}>
@@ -821,7 +833,6 @@ export function InvestigationDesk() {
           highlight={highlight}
           pending={pending}
           phase={phase}
-          etaLabel={etaLabel}
           notes={notes}
           noteDraft={noteDraft}
           onDraft={setNoteDraft}
@@ -832,20 +843,25 @@ export function InvestigationDesk() {
 
       <DecisionRail
         phase={phase}
-        title={moment.title}
-        detail={detailWithEta}
+        title={railTitle}
+        detail={railDetail}
         focus={moment.focus}
         pending={pending}
         session={session}
         testId={testId}
+        etaLabel={etaLabel}
         showApprove={showApprove}
         showRun={showRun}
         showSteer={showSteer}
+        showPause={showPause}
+        showResume={showResume}
         awaitingApproval={awaitingApproval}
         demoBlocksLiveRun={demoBlocksLiveRun}
         tutorialBlocksRun={tutorialBlocksRun}
         locked={coachLocks && (tutorialStep == null || tutorialTarget(tutorialStep) !== "hitl")}
         onTestId={setTestId}
+        onPause={onPause}
+        onResume={onResume}
         onRun={onRun}
         onApprove={onApprove}
         onReject={onReject}
@@ -869,16 +885,18 @@ export function InvestigationDesk() {
 function CaseColumn({ session, locked }: { session: PublicSession | null; locked?: boolean }) {
   return (
     <section
-      className="nw-scroll border-b border-[var(--nw-line)] px-4 py-4 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-b-0"
+      className="nw-scroll nw-side border-b px-4 py-4 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-b-0"
       aria-label="链路与症状"
       data-tutorial-target="case"
       inert={locked ? true : undefined}
     >
-      <h2 className="nw-muted text-sm font-medium">链路</h2>
+      <SectionHead title="链路" />
       {session ? <LinkDiagram incident={session.incident} /> : null}
       {session ? (
         <>
-          <h2 className="nw-muted mt-5 text-sm font-medium">症状</h2>
+          <div className="mt-6">
+            <SectionHead title="症状" />
+          </div>
           <ul className="mt-2 flex flex-col gap-2">
             {session.incident.symptoms.map((symptom) => (
               <li key={symptom} className="flex gap-2 text-sm leading-5">
@@ -887,22 +905,20 @@ function CaseColumn({ session, locked }: { session: PublicSession | null; locked
               </li>
             ))}
           </ul>
-          <dl className="mt-5 flex flex-col gap-3 text-sm">
-            <div>
-              <dt className="nw-faint text-xs">观察窗</dt>
-              <dd className="mt-1">
+          <dl className="nw-panel mt-6 divide-y divide-[var(--nw-line)] text-sm">
+            <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2 px-3 py-2.5">
+              <dt className="nw-faint text-xs leading-5">观察窗</dt>
+              <dd className="font-mono text-xs leading-5">
                 {shortTime(session.incident.timeWindow.from)} – {shortTime(session.incident.timeWindow.to)}
               </dd>
             </div>
-            <div>
-              <dt className="nw-faint text-xs">开单</dt>
-              <dd className="mt-1">
-                {shortTime(session.incident.openedAt)} · {session.incident.id}
-              </dd>
+            <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2 px-3 py-2.5">
+              <dt className="nw-faint text-xs leading-5">开单</dt>
+              <dd className="font-mono text-xs leading-5">{shortTime(session.incident.openedAt)}</dd>
             </div>
-            <div>
-              <dt className="nw-faint text-xs">维护</dt>
-              <dd className="mt-1 leading-5">{session.incident.maintenanceWindowSummary}</dd>
+            <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2 px-3 py-2.5">
+              <dt className="nw-faint text-xs leading-5">维护</dt>
+              <dd className="leading-5">{session.incident.maintenanceWindowSummary}</dd>
             </div>
           </dl>
         </>
@@ -1018,14 +1034,19 @@ function DecisionRail({
   pending,
   session,
   testId,
+  etaLabel,
   showApprove,
   showRun,
   showSteer,
+  showPause,
+  showResume,
   awaitingApproval,
   demoBlocksLiveRun,
   tutorialBlocksRun,
   locked,
   onTestId,
+  onPause,
+  onResume,
   onRun,
   onApprove,
   onReject,
@@ -1038,34 +1059,44 @@ function DecisionRail({
   pending: boolean;
   session: PublicSession | null;
   testId: string;
+  etaLabel: string | null;
   showApprove: boolean;
   showRun: boolean;
   showSteer: boolean;
+  showPause: boolean;
+  showResume: boolean;
   awaitingApproval: boolean;
   demoBlocksLiveRun: boolean;
   tutorialBlocksRun: boolean;
   locked?: boolean;
   onTestId: (id: string) => void;
+  onPause: () => void;
+  onResume: () => void;
   onRun: () => void;
   onApprove: () => void;
   onReject: () => void;
   onRequest: (evidenceClass: "telemetry" | "logs" | "maintenance") => void;
 }) {
-  const runLabel = pending ? "调查进行中" : focus === "rerun" ? "再运行调查" : "运行调查";
+  const runLabel = focus === "rerun" ? "再运行调查" : "运行调查";
+  const needsHuman = awaitingApproval || showResume || (focus === "rerun" && Boolean(session?.approval));
   return (
     <footer
-      className={cx("nw-rail shrink-0 px-4 py-3", awaitingApproval && "nw-rail-awaiting")}
+      className={cx("nw-rail shrink-0 px-4 py-3", needsHuman && "nw-rail-awaiting")}
       data-hitl-rail="true"
       data-tutorial-target="hitl"
       data-awaiting-approval={awaitingApproval ? "true" : "false"}
+      data-eta={etaLabel ?? ""}
       data-phase={phase}
       aria-label="决策"
       inert={locked ? true : undefined}
     >
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div className="min-w-0 lg:max-w-xl" aria-live="polite">
-          <p className="flex items-center gap-2 text-sm font-medium">
-            {awaitingApproval ? <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 bg-[var(--nw-pop)]" /> : null}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0 lg:max-w-2xl" aria-live="polite">
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <span
+              aria-hidden="true"
+              className={cx("nw-dot", needsHuman && "nw-dot-pop", pending && "nw-dot-live")}
+            />
             {title}
           </p>
           {detail ? <p className="nw-muted mt-1 text-sm leading-5">{detail}</p> : null}
@@ -1088,22 +1119,32 @@ function DecisionRail({
               <EvidenceRequestNote session={session} />
             </div>
           ) : null}
-          {showRun ? (
+          {showPause ? (
+            <DeskButton tone="quiet" data-action="pause" onClick={onPause}>
+              暂停
+            </DeskButton>
+          ) : null}
+          {showResume ? (
+            <DeskButton tone="primary" className="px-4" data-action="resume" onClick={onResume}>
+              继续
+            </DeskButton>
+          ) : null}
+          {showRun && !pending ? (
             <>
+              {focus === "rerun" ? (
+                <DeskButton tone="quiet" onClick={onReject}>
+                  撤回批准
+                </DeskButton>
+              ) : null}
               <DeskButton
                 tone="primary"
-                className="px-4 py-2"
-                disabled={pending || !session || demoBlocksLiveRun || tutorialBlocksRun}
+                className="px-4"
+                disabled={!session || demoBlocksLiveRun || tutorialBlocksRun}
                 title={demoBlocksLiveRun ? "合成回放中。要走真实接口，先重置。" : undefined}
                 onClick={onRun}
               >
                 {runLabel}
               </DeskButton>
-              {focus === "rerun" ? (
-                <DeskButton tone="quiet" disabled={pending} onClick={onReject}>
-                  拒绝
-                </DeskButton>
-              ) : null}
             </>
           ) : null}
         </div>
@@ -1140,7 +1181,7 @@ function ApproveControls({
           <span className="nw-faint shrink-0">测试</span>
           <select
             id="diagnostic-select"
-            className="min-w-0 max-w-72 px-2 py-2"
+            className="nw-select min-w-0 max-w-72 px-2 py-1.5 text-sm"
             value={testId}
             disabled={catalog.length === 0 || pending}
             onChange={(event) => onTestId(event.target.value)}
@@ -1152,11 +1193,11 @@ function ApproveControls({
             ))}
           </select>
         </label>
-        <DeskButton tone="primary" className="px-4 py-2" disabled={pending || !testId} onClick={onApprove}>
-          批准
-        </DeskButton>
         <DeskButton tone="quiet" disabled={pending || (!proposal && !session.approval)} onClick={onReject}>
           拒绝
+        </DeskButton>
+        <DeskButton tone="pop" className="px-4" disabled={pending || !testId} onClick={onApprove}>
+          批准
         </DeskButton>
       </div>
       {selected ? <p className="nw-faint max-w-xl text-xs leading-5">{selected.measures}</p> : null}
@@ -1192,7 +1233,16 @@ function HypothesisBoard({
   const showSkeleton = hypotheses.length === 0 && Boolean(session) && (pending || RUNNING_PHASES.has(session?.phase ?? "idle"));
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="nw-muted text-sm font-medium">假设</h2>
+      <SectionHead
+        title="假设"
+        meta={
+          hypotheses.length === 0
+            ? undefined
+            : selectedHypothesisId
+              ? `${hypotheses.length} 条`
+              : `${hypotheses.length} 条 · 点一条可排除或先查`
+        }
+      />
       {hypotheses.length > 0 && session ? (
         <ul className="flex flex-col gap-3">
           {hypotheses.map((item) => (
@@ -1248,41 +1298,54 @@ function HypothesisCard({
   return (
     <li
       className={cx(
-        "nw-panel p-3",
-        selected && "border-[var(--nw-pop)] bg-[#1a1614]",
-        !selected && linked && "border-[var(--nw-line-strong)]",
+        "nw-panel nw-card relative p-3",
+        selected && "nw-selected",
+        !selected && linked && "nw-linked",
         marked && "desk-new",
-        !selected && !linked && !marked && item.status === "priority" && "border-[var(--nw-pop)]",
-        item.status === "excluded" && "opacity-55",
+        !selected && !linked && item.status === "priority" && "nw-priority",
+        item.status === "excluded" && "opacity-60",
       )}
       data-hypothesis={item.id}
       data-selected={selected ? "true" : "false"}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <h3 className={cx("min-w-0 text-base font-medium", item.status === "excluded" && "line-through")}>
-          <button type="button" className="text-left" aria-pressed={selected} onClick={onSelect}>
+      <div className="flex items-start justify-between gap-3">
+        <h3 className={cx("min-w-0 text-[15px] font-semibold leading-6", item.status === "excluded" && "line-through")}>
+          <button
+            type="button"
+            className="text-left after:absolute after:inset-0 after:content-['']"
+            aria-pressed={selected}
+            onClick={onSelect}
+          >
             {item.title}
           </button>
         </h3>
-        <div className="flex flex-wrap items-center gap-2">
-          <DeskButton tone="quiet" className="px-2 py-1 text-xs" disabled={pending || item.status === "priority"} onClick={onPrioritize}>
-            先查这条
-          </DeskButton>
-          <DeskButton tone="quiet" className="px-2 py-1 text-xs" disabled={pending || item.status === "excluded"} onClick={onExclude}>
-            排除
-          </DeskButton>
+        <span className="flex shrink-0 items-center gap-2">
+          {change ? (
+            <span className="nw-pop-text text-xs">
+              {STATUS_LABEL[change.from]} → {STATUS_LABEL[change.to]}
+            </span>
+          ) : null}
+          {isNew ? <span className="nw-pop-text text-xs">新</span> : null}
+          {!isNew && !change && textChanged ? <span className="nw-pop-text text-xs">依据已更新</span> : null}
           <StatusBadge status={item.status} />
-        </div>
+        </span>
       </div>
-      {change ? (
-        <p className="nw-pop-text mt-2 text-sm">
-          {STATUS_LABEL[change.from]} → {STATUS_LABEL[change.to]}
-        </p>
+      <p className={cx("nw-muted mt-1.5 text-sm leading-6", !selected && "line-clamp-2")}>{item.rationale}</p>
+      {selected ? (
+        <div className="relative z-10 mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--nw-line)] pt-3">
+          <p className="nw-faint min-w-0 text-xs leading-5">
+            {evidenceNames.length > 0 ? `依据：${evidenceNames.join("、")}` : "暂无直接证据"}
+          </p>
+          <span className="flex gap-2">
+            <DeskButton tone="quiet" className="px-2.5 py-1 text-xs" disabled={pending || item.status === "priority"} onClick={onPrioritize}>
+              先查这条
+            </DeskButton>
+            <DeskButton tone="quiet" className="px-2.5 py-1 text-xs" disabled={pending || item.status === "excluded"} onClick={onExclude}>
+              排除
+            </DeskButton>
+          </span>
+        </div>
       ) : null}
-      {isNew ? <p className="nw-pop-text mt-2 text-sm">新假设</p> : null}
-      {!isNew && !change && textChanged ? <p className="nw-pop-text mt-2 text-sm">依据已更新</p> : null}
-      <p className={cx("mt-2 text-sm leading-6", !selected && "line-clamp-2")}>{item.rationale}</p>
-      {selected && evidenceNames.length > 0 ? <p className="nw-muted mt-2 text-sm">依据 {evidenceNames.join("、")}</p> : null}
     </li>
   );
 }
@@ -1304,28 +1367,43 @@ function HandoffExport({
   onMarkdown: () => void;
   onJson: () => void;
 }) {
-  return (
-    <div className="flex items-stretch" role="group" aria-label="交接稿">
-      <DeskButton
-        tone={emphasize ? "primary" : "quiet"}
-        disabled={!ready}
-        title={ready ? "下载 Markdown" : "无假设或证据"}
-        data-action="export-report"
-        onClick={onMarkdown}
-      >
+  const menuRef = useRef<HTMLDetailsElement>(null);
+  const pick = (action: () => void) => {
+    action();
+    menuRef.current?.removeAttribute("open");
+  };
+  useEffect(() => {
+    const close = (event: PointerEvent) => {
+      const menu = menuRef.current;
+      if (menu?.open && !menu.contains(event.target as Node)) menu.removeAttribute("open");
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, []);
+  if (!ready) {
+    return (
+      <DeskButton tone="quiet" disabled title="还没有可导出的假设或证据" data-action="export-report">
         交接稿
       </DeskButton>
-      <DeskButton
-        tone="quiet"
-        className="border-l-0 px-2 text-xs"
-        disabled={!ready}
-        title={ready ? "下载公开会话 JSON" : "无假设或证据"}
-        data-action="export-json"
-        onClick={onJson}
-      >
-        JSON
-      </DeskButton>
-    </div>
+    );
+  }
+  return (
+    <details ref={menuRef} className="nw-menu relative" aria-label="交接稿">
+      <summary className={cx("nw-btn px-3 py-1.5 text-sm", emphasize && "nw-btn-primary")}>
+        交接稿
+        <Chevron open />
+      </summary>
+      <div className="nw-menu-list" role="menu">
+        <button type="button" role="menuitem" data-action="export-report" onClick={() => pick(onMarkdown)}>
+          <span>Markdown</span>
+          <span className="nw-faint text-xs">给人看</span>
+        </button>
+        <button type="button" role="menuitem" data-action="export-json" onClick={() => pick(onJson)}>
+          <span>JSON</span>
+          <span className="nw-faint text-xs">公开会话</span>
+        </button>
+      </div>
+    </details>
   );
 }
 
@@ -1371,7 +1449,7 @@ function EvidenceBoard({
   const showSkeleton = evidence.length === 0 && Boolean(session) && (pending || RUNNING_PHASES.has(session?.phase ?? "idle"));
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="nw-muted text-sm font-medium">证据</h2>
+      <SectionHead title="证据" meta={evidence.length > 0 ? `${evidence.length} 条` : undefined} />
       {evidence.length === 0 || !session ? null : (
         <ul className="flex flex-col gap-3">
           {evidence.map((item) => (
@@ -1416,36 +1494,38 @@ function EvidenceCard({
   return (
     <li
       className={cx(
-        "nw-panel",
-        selected && "border-[var(--nw-pop)] bg-[#1a1614]",
-        !selected && linked && "border-[var(--nw-line-strong)]",
+        "nw-panel nw-card overflow-hidden",
+        selected && "nw-selected",
+        !selected && linked && "nw-linked",
         fresh && "desk-new",
       )}
       data-evidence={item.evidenceId}
       data-open={open ? "true" : "false"}
       data-selected={selected ? "true" : "false"}
     >
-      <button type="button" className="flex w-full items-start gap-3 p-3 text-left" aria-expanded={open} onClick={onToggle}>
+      <button type="button" className="nw-toggle flex w-full items-start gap-3 p-3 text-left" aria-expanded={open} onClick={onToggle}>
         <EvidenceGlyph evidenceClass={item.evidenceClass} />
         <span className="min-w-0 flex-1">
           <span className="flex items-start justify-between gap-3">
-            <span className="font-medium">{item.title}</span>
-            <span className="nw-faint shrink-0 text-xs">
-              {EVIDENCE_CLASS_LABEL[item.evidenceClass]}
-              {fresh ? (diagnostic ? " · 新证" : " · 新") : ""}
+            <span className="text-sm font-medium leading-6">{item.title}</span>
+            <span className="flex shrink-0 items-center gap-1.5 pt-0.5 text-xs">
+              {fresh ? <span className="nw-pop-text">新</span> : null}
+              <span className={diagnostic ? "nw-pop-text" : "nw-faint"}>{EVIDENCE_CLASS_LABEL[item.evidenceClass]}</span>
             </span>
           </span>
           {open ? null : <span className="nw-muted mt-1 line-clamp-1 block text-sm">{summary}</span>}
         </span>
-        <span aria-hidden="true" className="nw-faint pt-1 text-xs">
-          {open ? "▾" : "▸"}
+        <span className="nw-faint pt-1.5">
+          <Chevron open={open} />
         </span>
       </button>
       {open ? (
-        <div className="border-t border-[var(--nw-line)] px-3 pt-2 pb-3 pl-12">
-          {provenance ? <p className="nw-faint font-mono text-[11px]">{provenance}</p> : null}
-          <pre className="mt-2 text-sm">{item.body}</pre>
-          <MiniLink incident={session.incident} />
+        <div className="border-t border-[var(--nw-line)] px-3 pt-2.5 pb-3 pl-13">
+          <pre className="text-sm leading-6">{item.body}</pre>
+          <p className="nw-faint mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px]">
+            {provenance ? <span>来源 {provenance}</span> : null}
+            <MiniLink incident={session.incident} />
+          </p>
         </div>
       ) : null}
     </li>
@@ -1456,8 +1536,8 @@ function DeskSkeleton({ label }: { label: string }) {
   return (
     <div className="nw-panel p-3" aria-hidden="true">
       {label ? <span className="nw-badge">{label}</span> : null}
-      <div className="mt-3 h-3 w-2/3 bg-[var(--nw-line)]" />
-      <div className="mt-2 h-3 w-1/2 bg-[var(--nw-line)]" />
+      <div className="nw-skel mt-3 h-3 w-2/3" />
+      <div className="nw-skel mt-2 h-3 w-1/2" />
     </div>
   );
 }
@@ -1467,8 +1547,10 @@ function EvidenceGlyph({ evidenceClass }: { evidenceClass: EvidenceClass }) {
   return (
     <span
       className={cx(
-        "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center border",
-        diagnostic ? "border-[var(--nw-pop)] text-[var(--nw-pop)]" : "border-[var(--nw-line)] text-[var(--nw-muted)]",
+        "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border",
+        diagnostic
+          ? "border-[var(--nw-pop)] bg-[var(--nw-pop-wash)] text-[var(--nw-pop)]"
+          : "border-[var(--nw-line)] bg-[var(--nw-panel-2)] text-[var(--nw-muted)]",
       )}
       title={EVIDENCE_CLASS_LABEL[evidenceClass]}
     >
@@ -1499,7 +1581,7 @@ function EvidenceGlyph({ evidenceClass }: { evidenceClass: EvidenceClass }) {
 function MiniLink({ incident }: { incident: PublicIncident }) {
   return (
     <span
-      className="mt-1 inline-flex items-center gap-1 text-[var(--nw-faint)]"
+      className="inline-flex items-center gap-1 text-[var(--nw-faint)]"
       aria-label={`${incident.nodes.alice} 经 ${incident.nodes.linkId} 到 ${incident.nodes.bob}`}
     >
       <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
@@ -1522,7 +1604,6 @@ function TrailColumn({
   highlight,
   pending,
   phase,
-  etaLabel,
   notes,
   noteDraft,
   onDraft,
@@ -1533,7 +1614,6 @@ function TrailColumn({
   highlight: DeskDiff | null;
   pending: boolean;
   phase: Phase;
-  etaLabel: string | null;
   notes: OperatorNote[];
   noteDraft: string;
   onDraft: (value: string) => void;
@@ -1541,37 +1621,38 @@ function TrailColumn({
   locked?: boolean;
 }) {
   const trail = session?.phaseTrail ?? [];
-  const path = trail.length > 1 ? trail.map((item) => PHASE_LABELS[item]).join(" → ") : "";
+  const path = latestLeg(trail).length > 1 ? legLabel(trail) : "";
   const count = session?.trace.length ?? 0;
   return (
-    <aside className="flex flex-col lg:min-h-0 lg:overflow-hidden" aria-label="运行日志" data-tutorial-target="log" inert={locked ? true : undefined}>
+    <aside
+      className="nw-side flex flex-col lg:min-h-0 lg:overflow-hidden lg:border-l"
+      aria-label="运行日志"
+      data-tutorial-target="log"
+      inert={locked ? true : undefined}
+    >
       <div className="shrink-0 border-b border-[var(--nw-line)] px-4 py-3">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="nw-muted text-sm font-medium">运行</h2>
-          <span className="flex items-center gap-2">
-            {etaLabel ? <span className="nw-badge">{etaLabel}</span> : null}
-            {count > 0 ? <span className="nw-faint font-mono text-xs">{count}</span> : null}
-            <span className={cx("nw-badge", (phase === "awaiting_test_approval" || phase === "error") && "nw-badge-priority")}>
-              {PHASE_LABELS[phase]}
-            </span>
+          <SectionHead title="运行日志" meta={count > 0 ? `${count} 次调用` : undefined} />
+          <span className={cx("nw-badge", (phase === "awaiting_test_approval" || phase === "error") && "nw-badge-priority")}>
+            {PHASE_LABELS[phase]}
           </span>
         </div>
-        {path ? <p className="nw-faint mt-2 text-xs leading-5">{path}</p> : null}
+        {path ? <p className="nw-faint mt-1.5 text-xs leading-5">{path}</p> : null}
       </div>
       <div className="nw-scroll px-4 py-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         <RunLog session={session} highlight={highlight} pending={pending} phase={phase} notes={notes} />
       </div>
       <form
-        className="flex shrink-0 gap-2 border-t border-[var(--nw-line)] px-4 py-2"
+        className="flex shrink-0 gap-2 border-t border-[var(--nw-line)] px-4 py-2.5"
         onSubmit={(event) => {
           event.preventDefault();
           onNote(noteDraft);
         }}
       >
         <input
-          className="min-w-0 flex-1 border border-[var(--nw-line)] bg-transparent px-2 py-1.5 text-sm"
+          className="nw-input min-w-0 flex-1 px-2.5 py-1.5 text-sm"
           value={noteDraft}
-          placeholder="记一条"
+          placeholder="备注，或「排除」「先查」「看日志」"
           aria-label="操作备注"
           title="排除、优先、看遥测、看日志、看维护，或自由备注"
           data-action="operator-note"
@@ -1621,8 +1702,10 @@ function RunLog({
       ))}
       {showLive ? (
         <li className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-2 border-b border-[var(--nw-line)] py-2.5 last:border-b-0">
-          <span className="pt-0.5 font-mono text-[11px] text-[var(--nw-text)]">NOW</span>
-          <p className="text-sm font-medium">{PHASE_LABELS[phase]}</p>
+          <span className="flex items-center pt-1.5">
+            <span aria-hidden="true" className="nw-dot nw-dot-live" />
+          </span>
+          <p className="text-sm font-medium">{PHASE_LABELS[phase]}…</p>
         </li>
       ) : null}
       {showError ? (
@@ -1658,10 +1741,15 @@ function ToolRow({ event, origin, fresh }: { event: TraceEvent; origin: number |
         {summary ? <p className="nw-muted mt-1 text-xs leading-5">{summary}</p> : null}
         {failed ? <p className="nw-pop-text mt-1 text-xs leading-5">{event.error}</p> : null}
         <details className="mt-1">
-          <summary className="nw-faint text-xs">{failed ? "输入" : "输出"}</summary>
-          <p className="nw-faint mt-2 font-mono text-[11px]">{event.toolName}</p>
-          <pre className="mt-1 text-xs">{JSON.stringify(event.input, null, 2)}</pre>
-          {event.status === "ok" ? <pre className="mt-2 text-xs">{JSON.stringify(event.output, null, 2)}</pre> : null}
+          <summary className="nw-faint text-xs">原始 JSON</summary>
+          <p className="nw-faint mt-2 text-[11px]">入参</p>
+          <pre className="nw-code mt-1">{JSON.stringify(event.input, null, 2)}</pre>
+          {event.status === "ok" ? (
+            <>
+              <p className="nw-faint mt-2 text-[11px]">返回</p>
+              <pre className="nw-code mt-1">{JSON.stringify(event.output, null, 2)}</pre>
+            </>
+          ) : null}
         </details>
       </div>
     </li>
@@ -1699,6 +1787,19 @@ function formatStamp(at: string, origin: number | null): string {
   return formatOffset(time - origin);
 }
 
+function SectionHead({ title, meta }: { title: string; meta?: string }) {
+  return (
+    <h2 className="flex items-baseline gap-2">
+      <span className="nw-section">{title}</span>
+      {meta ? <span className="nw-faint text-xs">{meta}</span> : null}
+    </h2>
+  );
+}
+
+function joinCopy(...parts: string[]): string {
+  return parts.filter(Boolean).join("");
+}
+
 function StatusBadge({ status }: { status: HypothesisStatus }) {
   return (
     <span
@@ -1718,15 +1819,34 @@ function DeskButton({
   className,
   children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { tone: "primary" | "quiet" }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { tone: "primary" | "quiet" | "pop" }) {
   return (
     <button
       {...props}
       type="button"
-      className={cx("nw-btn px-3 py-2 text-sm", tone === "primary" && "nw-btn-primary", className)}
+      className={cx(
+        "nw-btn px-3 py-1.5 text-sm",
+        tone === "primary" && "nw-btn-primary",
+        tone === "pop" && "nw-btn-pop",
+        className,
+      )}
     >
       {children}
     </button>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      aria-hidden="true"
+      className={cx("shrink-0 transition-transform", open ? "rotate-90" : "rotate-0")}
+    >
+      <path d="M4.5 2.5 L8 6 L4.5 9.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
   );
 }
 

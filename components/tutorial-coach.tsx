@@ -96,11 +96,11 @@ export function TutorialCoach({
               left: box.left,
               width: box.width,
               height: box.height,
-              boxShadow: "0 0 0 9999px rgba(8, 10, 9, 0.72)",
+              boxShadow: "0 0 0 9999px rgba(24, 30, 27, 0.42)",
             }}
           />
         ) : (
-          <div className="fixed inset-0" style={{ background: "rgba(8, 10, 9, 0.72)" }} />
+          <div className="fixed inset-0" style={{ background: "rgba(24, 30, 27, 0.42)" }} />
         )}
       </div>
       )}
