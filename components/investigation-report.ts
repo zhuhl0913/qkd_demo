@@ -2,10 +2,12 @@ import {
   EVIDENCE_CLASS_LABEL,
   STATUS_LABEL,
   briefInput,
+  formatOffset,
   hasFreshEvidence,
   shortTime,
   toolLabel,
 } from "./desk-loop";
+import type { OperatorNote } from "./operator-note";
 import {
   PHASE_LABELS,
   type Hypothesis,
@@ -36,12 +38,20 @@ export function investigationReportFileName(session: Pick<PublicSession, "incide
 
 export function buildInvestigationReport(
   session: PublicSession,
-  options: { generatedAt?: string } = {},
+  options: { generatedAt?: string; notes?: OperatorNote[] } = {},
 ): string {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const incident = session.incident;
   const blocks = [
-    ["# 调查报告", "", `**${oneLine(incident.title) || incident.id}**`, "", quote(incident.disclaimer)].join("\n"),
+    [
+      "# 调查报告",
+      "",
+      "交接稿。供人阅读和复用，不触发修复。",
+      "",
+      `**${oneLine(incident.title) || incident.id}**`,
+      "",
+      quote(incident.disclaimer),
+    ].join("\n"),
     [
       "## 事件摘要",
       "",
@@ -65,23 +75,74 @@ export function buildInvestigationReport(
     diagnosticBlock(session),
     evidenceBlock(session),
     traceBlock(session),
+    notesBlock(options.notes ?? []),
+    nextBlock(session),
     [
       "## 说明",
       "",
       "本文件是调查台对当前公开会话的本地导出，用来交接阅读。它不是外部工单系统里的单据，也不会触发修复。导出不会再跑一轮调查。",
     ].join("\n"),
   ];
-  return `${blocks.join("\n\n")}\n`;
+  return `${blocks.filter(Boolean).join("\n\n")}\n`;
+}
+
+export function investigationHandoffFileName(session: Pick<PublicSession, "incidentId">): string {
+  return investigationReportFileName(session).replace(/^investigation-report-/, "investigation-handoff-").replace(/\.md$/, ".json");
+}
+
+export function buildInvestigationHandoffJson(
+  session: PublicSession,
+  options: { generatedAt?: string; notes?: OperatorNote[] } = {},
+): string {
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+  return `${JSON.stringify(
+    {
+      kind: "investigation-handoff",
+      generatedAt,
+      session,
+      notes: (options.notes ?? []).map((note) => ({
+        id: note.id,
+        at: note.at,
+        text: note.text,
+        effect: note.effect,
+        detail: note.detail,
+      })),
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 export function downloadInvestigationReport(
   session: PublicSession,
   generatedAt = new Date().toISOString(),
+  notes: OperatorNote[] = [],
 ): string {
   const fileName = investigationReportFileName(session);
-  const markdown = buildInvestigationReport(session, { generatedAt });
+  const markdown = buildInvestigationReport(session, { generatedAt, notes });
   if (typeof document === "undefined") return fileName;
   const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.rel = "noopener";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return fileName;
+}
+
+export function downloadInvestigationHandoff(
+  session: PublicSession,
+  generatedAt = new Date().toISOString(),
+  notes: OperatorNote[] = [],
+): string {
+  const fileName = investigationHandoffFileName(session);
+  const json = buildInvestigationHandoffJson(session, { generatedAt, notes });
+  if (typeof document === "undefined") return fileName;
+  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -222,7 +283,14 @@ function evidenceBlock(session: PublicSession): string {
   }
   const cards = session.evidence.map((item) => {
     const heading = `### ${EVIDENCE_CLASS_LABEL[item.evidenceClass]} · ${oneLine(item.title) || item.evidenceId}`;
-    return [heading, "", `编号：${item.evidenceId}`, "", fenced(item.body)].join("\n");
+    return [
+      heading,
+      "",
+      `编号：${item.evidenceId}`,
+      `来源：${toolLabel(item.sourceTool)}（${item.sourceTool}）`,
+      "",
+      fenced(item.body),
+    ].join("\n");
   });
   return ["## 证据要点", "", cards.join("\n\n")].join("\n");
 }
@@ -233,19 +301,52 @@ function traceBlock(session: PublicSession): string {
   }
   const ok = session.trace.filter((event) => event.status === "ok").length;
   const failed = session.trace.length - ok;
-  const lines = session.trace.map((event) => traceLine(event));
+  const origin = traceOrigin(session.trace);
+  const lines = session.trace.map((event) => traceLine(event, origin));
   return ["## 工具轨迹", "", `共 ${session.trace.length} 次，成功 ${ok}，失败 ${failed}。`, "", ...lines].join("\n");
 }
 
-function traceLine(event: TraceEvent): string {
+function traceOrigin(trace: TraceEvent[]): number | null {
+  return trace.reduce<number | null>((earliest, event) => {
+    const time = Date.parse(event.at);
+    if (Number.isNaN(time)) return earliest;
+    return earliest === null || time < earliest ? time : earliest;
+  }, null);
+}
+
+function traceLine(event: TraceEvent, origin: number | null): string {
   const status = event.status === "ok" ? "成功" : "失败";
   const summary = briefInput(event.input);
-  const head = `- ${shortTime(event.at)} · ${toolLabel(event.toolName)} · ${status}`;
+  const time = Date.parse(event.at);
+  const offset = origin === null || Number.isNaN(time) ? "—" : formatOffset(time - origin);
+  const head = `- ${offset} · ${shortTime(event.at)} · ${toolLabel(event.toolName)} · ${status}`;
   const withInput = summary ? `${head} · ${summary}` : head;
   if (event.status === "error" && event.error?.trim()) {
     return `${withInput}\n  - ${oneLine(event.error)}`;
   }
   return withInput;
+}
+
+function notesBlock(notes: OperatorNote[]): string {
+  if (notes.length === 0) return "";
+  const lines = notes.map((note) => `- ${shortTime(note.at)} · ${oneLine(note.text)} · ${note.detail}`);
+  return ["## 操作备注", "", ...lines].join("\n");
+}
+
+function nextBlock(session: PublicSession): string {
+  if (session.phase === "awaiting_test_approval" || session.phase === "proposing_test") {
+    return ["## 接下来", "", "- 批准或拒绝当前诊断。未批准不会执行。"].join("\n");
+  }
+  if (session.phase === "error") {
+    return ["## 接下来", "", "- 看错误记录。重置后可以再运行。"].join("\n");
+  }
+  if (session.phase === "concluded") {
+    return ["## 接下来", "", "- 本交接稿到此。调查台不会自动修复。"].join("\n");
+  }
+  if (session.hypotheses.length > 0) {
+    return ["## 接下来", "", "- 可以排除或优先一条假设，或再运行调查。"].join("\n");
+  }
+  return ["## 接下来", "", "- 运行调查后再导出更新的交接稿。"].join("\n");
 }
 
 function orderedHypotheses(items: Hypothesis[]): Hypothesis[] {

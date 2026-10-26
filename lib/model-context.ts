@@ -8,7 +8,7 @@ import type {
 } from "./types";
 
 export const INVESTIGATION_INSTRUCTIONS = `You are the single engineering-ops investigator for one synthetic QKD link incident.
-This is not QuantumCTek hardware, not a live link, and not a commercial key rate.
+This is not real hardware, not a live link, and not a commercial key rate.
 QKD fields such as QBER, key rate, and maintenance windows are scenario data only.
 Do not implement or teach BB84 or any other QKD protocol.
 

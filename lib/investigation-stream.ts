@@ -24,9 +24,13 @@ function errorMessage(error: unknown): string {
  * Each progress line is the public session after a phase change or a real
  * tool result. The caller still made one request.
  */
-export function streamInvestigation(model?: LanguageModel): ReadableStream<Uint8Array> {
+export function streamInvestigation(model?: LanguageModel, signal?: AbortSignal): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let closed = false;
+  const local = new AbortController();
+  const abort = () => local.abort();
+  if (signal?.aborted) abort();
+  else signal?.addEventListener("abort", abort, { once: true });
 
   return new ReadableStream({
     async start(controller) {
@@ -41,6 +45,7 @@ export function streamInvestigation(model?: LanguageModel): ReadableStream<Uint8
 
       try {
         const result = await runInvestigation(model, {
+          signal: local.signal,
           onProgress: (session) => {
             send({ type: "progress", session });
           },
@@ -68,12 +73,13 @@ export function streamInvestigation(model?: LanguageModel): ReadableStream<Uint8
     },
     cancel() {
       closed = true;
+      local.abort();
     },
   });
 }
 
-export function investigationResponse(model?: LanguageModel): Response {
-  return new Response(streamInvestigation(model), {
+export function investigationResponse(model?: LanguageModel, signal?: AbortSignal): Response {
+  return new Response(streamInvestigation(model, signal), {
     headers: INVESTIGATION_STREAM_HEADERS,
   });
 }

@@ -169,6 +169,15 @@ export function legLabel(trail: Phase[]): string {
     .join(" → ");
 }
 
+/** Live desk: a recorded steer should open the next investigation run. */
+export function steerContinuesInvestigation(session: PublicSession, paused: boolean): boolean {
+  if (paused || session.approval) return false;
+  if (session.phase !== "awaiting_steer") return false;
+  const previous = session.phaseTrail[session.phaseTrail.length - 2];
+  if (previous === "concluded") return false;
+  return true;
+}
+
 function testTitle(session: PublicSession, testId: string): string {
   return session.diagnosticCatalog.find((item) => item.testId === testId)?.title ?? testId;
 }
@@ -181,7 +190,7 @@ export function deskMoment(session: PublicSession, pending: boolean): DeskMoment
     return {
       focus: "wait",
       title: "调查进行中",
-      detail: `当前阶段是${PHASE_LABELS[session.phase]}。工具返回后会出现在轨迹里。`,
+      detail: PHASE_LABELS[session.phase],
     };
   }
 
@@ -194,11 +203,11 @@ export function deskMoment(session: PublicSession, pending: boolean): DeskMoment
   }
 
   if (session.phase === "idle") {
-    return { focus: "run", title: "运行调查", detail: "查这起事件，并写出假设。" };
+    return { focus: "run", title: "运行调查", detail: "" };
   }
 
   if (session.phase === "concluded") {
-    return { focus: "done", title: "已结束", detail: "要再看一遍，点重置。" };
+    return { focus: "done", title: "已结束", detail: "" };
   }
 
   if (session.approval) {
@@ -206,12 +215,12 @@ export function deskMoment(session: PublicSession, pending: boolean): DeskMoment
     return {
       focus: "rerun",
       title: "再运行调查",
-      detail: `已批准「${name}」。这一轮才会执行诊断。`,
+      detail: `已批准「${name}」。`,
     };
   }
 
   if (hasFreshEvidence(session) && session.phase === "awaiting_steer") {
-    return { focus: "done", title: "假设已更新", detail: "诊断证据已写入。可以继续转向，或结束调查。" };
+    return { focus: "steer", title: "转向", detail: "诊断证据已写入。" };
   }
 
   if (session.phase === "proposing_test" || session.phase === "awaiting_test_approval" || session.proposal) {
@@ -219,24 +228,24 @@ export function deskMoment(session: PublicSession, pending: boolean): DeskMoment
     return {
       focus: "approve",
       title: "批准诊断",
-      detail: name ? `提案是「${name}」。批准后要再运行一次。` : "选一项诊断。批准后要再运行一次。",
+      detail: name ? `提案「${name}」。` : "",
     };
   }
 
   if (session.phase === "awaiting_steer") {
     if (session.hypotheses.length === 0) {
-      return { focus: "run", title: "运行调查", detail: "还没有假设。" };
+      return { focus: "run", title: "运行调查", detail: "" };
     }
     if (session.steering.length === 0) {
-      return { focus: "steer", title: "转向", detail: "在假设卡片上排除或标成优先，也可以请求一类证据。" };
+      return { focus: "steer", title: "转向", detail: "" };
     }
-    return { focus: "run", title: "运行调查", detail: "转向会在这一轮交给模型。" };
+    return { focus: "run", title: "运行调查", detail: "" };
   }
 
   return {
     focus: "wait",
     title: PHASE_LABELS[session.phase],
-    detail: "等这一轮状态落定。",
+    detail: "",
   };
 }
 
@@ -318,6 +327,15 @@ export function changeChips(diff: DeskDiff): string[] {
   if (textOnly.length > 0) chips.push(`依据更新 ${textOnly.length}`);
   if (diff.steerIds.length > 0) chips.push(`新转向 ${diff.steerIds.length}`);
   return chips;
+}
+
+export function formatOffset(deltaMs: number): string {
+  const seconds = Math.max(0, deltaMs) / 1000;
+  if (seconds < 10) {
+    const rounded = Math.round(seconds * 10) / 10;
+    return `+${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}s`;
+  }
+  return `+${Math.round(seconds)}s`;
 }
 
 export function shortTime(iso: string): string {

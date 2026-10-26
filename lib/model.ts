@@ -50,7 +50,7 @@ export function getLanguageModel(): LanguageModel {
   const config = readModelConfig();
   if (!config.apiKey) {
     throw new Error(
-      "缺少 AI_API_KEY 或 OPENAI_API_KEY。把 .env.example 复制为 .env.local 并填入密钥。本次没有调用工具。",
+      "未配置模型密钥（AI_API_KEY），本次没有调用模型和工具。可以点「教程」查看完整流程；本地真跑见 README。",
     );
   }
 
