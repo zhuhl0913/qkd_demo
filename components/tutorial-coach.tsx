@@ -85,6 +85,7 @@ export function TutorialCoach({
 
   return (
     <div data-tutorial-coach={step} data-tutorial-open="true">
+      {step === "result" ? null : (
       <div className="pointer-events-none fixed inset-0 z-30">
         {box ? (
           <div
@@ -102,6 +103,7 @@ export function TutorialCoach({
           <div className="fixed inset-0" style={{ background: "rgba(8, 10, 9, 0.72)" }} />
         )}
       </div>
+      )}
       <section
         role="dialog"
         aria-modal="false"

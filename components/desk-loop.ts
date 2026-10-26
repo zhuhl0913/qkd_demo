@@ -169,6 +169,15 @@ export function legLabel(trail: Phase[]): string {
     .join(" → ");
 }
 
+/** Live desk: a recorded steer should open the next investigation run. */
+export function steerContinuesInvestigation(session: PublicSession, paused: boolean): boolean {
+  if (paused || session.approval) return false;
+  if (session.phase !== "awaiting_steer") return false;
+  const previous = session.phaseTrail[session.phaseTrail.length - 2];
+  if (previous === "concluded") return false;
+  return true;
+}
+
 function testTitle(session: PublicSession, testId: string): string {
   return session.diagnosticCatalog.find((item) => item.testId === testId)?.title ?? testId;
 }
@@ -211,7 +220,7 @@ export function deskMoment(session: PublicSession, pending: boolean): DeskMoment
   }
 
   if (hasFreshEvidence(session) && session.phase === "awaiting_steer") {
-    return { focus: "done", title: "假设已更新", detail: "诊断证据已写入。" };
+    return { focus: "steer", title: "转向", detail: "诊断证据已写入。" };
   }
 
   if (session.phase === "proposing_test" || session.phase === "awaiting_test_approval" || session.proposal) {

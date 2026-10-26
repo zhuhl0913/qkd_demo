@@ -45,10 +45,10 @@ export function interpretOperatorNote(
     return { effect: "exclude", text, detail: "已排除这条假设。", hypothesisId };
   }
 
-  if (/^(优先|prioritize)\b/.test(lower) || text.startsWith("优先")) {
+  if (/^(优先|先查|prioritize)\b/.test(lower) || text.startsWith("优先") || text.startsWith("先查")) {
     const hypothesisId = hypothesisIdFromText(text, session, selectedHypothesisId);
     if (!hypothesisId) return { effect: "note", text, detail: "已记下。" };
-    return { effect: "prioritize", text, detail: "已标为优先。", hypothesisId };
+    return { effect: "prioritize", text, detail: "已先查这条。", hypothesisId };
   }
 
   const evidenceClass = /遥测|telemetry/.test(lower)

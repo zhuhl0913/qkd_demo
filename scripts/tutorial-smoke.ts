@@ -73,6 +73,10 @@ assert.ok(tutorialGateHold(frames.at(-1)!));
 assert.equal(tutorialOnOpeningFrame("log", frames.at(-1)!).step, "gate");
 assert.equal(tutorialOnOpeningFrame("log", frames.at(-1)!).hold, true);
 assert.equal(tutorialOnOpeningFrame("work", frames.at(-1)!).hold, false);
+assert.equal(tutorialOnOpeningFrame("result", frames.at(-1)!).step, "gate");
+assert.equal(tutorialOnOpeningFrame("result", frames.at(-1)!).hold, true);
+assert.equal(tutorialOnOpeningFrame("result", frames[0]!).step, "result");
+assert.equal(tutorialOnOpeningFrame("result", frames[0]!).hold, false);
 
 assert.deepEqual(
   TUTORIAL_STEP_IDS.map((id) => tutorialTarget(id)),

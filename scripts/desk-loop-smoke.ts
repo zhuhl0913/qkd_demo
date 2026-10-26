@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { changeChips, deskMoment, diffSessions, legLabel, loopSteps } from "../components/desk-loop";
+import { changeChips, deskMoment, diffSessions, legLabel, loopSteps, steerContinuesInvestigation } from "../components/desk-loop";
 import { PHASE_LABELS, PHASES, type PublicSession } from "../lib/types";
 
 function session(patch: Partial<PublicSession> = {}): PublicSession {
@@ -210,8 +210,25 @@ const updated = session({
   approval: null,
 });
 const done = deskMoment(updated, false);
-assert.equal(done.focus, "done");
+assert.equal(done.focus, "steer");
 assert.match(done.detail, /诊断证据/);
+assert.equal(steerContinuesInvestigation(updated, false), true);
+assert.equal(steerContinuesInvestigation(updated, true), false);
+assert.equal(
+  steerContinuesInvestigation(
+    { ...updated, approval: { testId: "pol-controller-basis-check", approvedAt: "2026-10-25T00:00:05Z" } },
+    false,
+  ),
+  false,
+);
+assert.equal(
+  steerContinuesInvestigation(
+    { ...updated, phaseTrail: [...updated.phaseTrail.slice(0, -1), "concluded", "awaiting_steer"] },
+    false,
+  ),
+  false,
+);
+assert.equal(steerContinuesInvestigation(firstRun, false), false);
 assert.equal(loopSteps(updated, false).every((step) => step.done), true);
 assert.equal(loopSteps(updated, false).find((step) => step.id === "update")?.mark, "current");
 

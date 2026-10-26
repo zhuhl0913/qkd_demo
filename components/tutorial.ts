@@ -2,7 +2,6 @@ import type { PublicSession } from "@/lib/types";
 
 /**
  * Tutorial is demo playback plus a short coach. It does not call the agent.
- * 「演示回放」 stays silent: same frames, no coach copy.
  * Approving a test runs the diagnostic tool. It does not repair the link.
  */
 
@@ -56,6 +55,7 @@ export function tutorialOnOpeningFrame(
   step: TutorialStepId,
   frame: PublicSession,
 ): { step: TutorialStepId; hold: boolean } {
+  if (step === "result" && tutorialGateHold(frame)) return { step: "gate", hold: true };
   if (step === "log" || step === "gate") {
     if (tutorialGateHold(frame)) return { step: "gate", hold: true };
     return { step, hold: false };
@@ -91,7 +91,7 @@ export function tutorialCopy(
       lines: [
         "中栏上面是假设，下面是证据。",
         "回放先写入遥测、日志和维护，再列出解释。",
-        "点开一条假设可看依据。排除和优先只改调查方向，不改设备。",
+        "点开一条假设可看依据。排除和先查只改调查方向，不改设备。",
       ],
     };
   }
@@ -101,7 +101,7 @@ export function tutorialCopy(
       nextLabel: "下一步",
       lines: [
         "右栏是运行日志。每一行是一次工具调用。",
-        "底下可以记备注。「排除」「优先」「看日志」会走转向，其他句子只留在日志里。",
+        "底下可以记备注。「排除」「先查」「看日志」会走转向，其他句子只留在日志里。",
         "回放可以暂停，停在当前帧。「交接稿」只导出这一屏，不触发修复。",
       ],
     };
@@ -155,8 +155,9 @@ export function tutorialCopy(
     nextLabel: "完成",
       lines: [
       "诊断证据已写入，假设依据已更新。",
-      "这仍是调查记录，不是修复。",
-      "点「完成」后可导出交接稿。要走真实调查，先「重置」，再点「运行调查」。",
+      "还可以排除、先查一条，或在底栏请求遥测、日志、维护。",
+      "先查或请求证据会再提出一项诊断，仍要你自己批准。",
+      "点「完成」只关掉说明。交接稿或重置才结束这次调查。",
     ],
   };
 }

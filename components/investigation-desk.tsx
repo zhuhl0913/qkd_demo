@@ -10,6 +10,7 @@ import {
   formatOffset,
   shortTime,
   STATUS_LABEL,
+  steerContinuesInvestigation,
   toolLabel,
   type DeskDiff,
   type DeskFocus,
@@ -18,7 +19,7 @@ import {
   carryDemoSteer,
   DEMO_STEP_MS,
   demoApprove,
-  demoConclude,
+  demoContinue,
   demoEpilogue,
   demoOpening,
   demoReject,
@@ -189,7 +190,7 @@ export function InvestigationDesk() {
   }
 
   async function runInvestigationStream() {
-    if (busyRef.current) return;
+    if (busyRef.current || pausedRef.current) return;
     busyRef.current = true;
     const controller = new AbortController();
     abortRef.current?.abort();
@@ -379,6 +380,39 @@ export function InvestigationDesk() {
     beginPlay(demoEpilogue(base, demoStartedRef.current || nowMs()));
   }
 
+  function continueDemo(steered: PublicSession) {
+    if (pausedRef.current) return;
+    const frames = demoContinue(steered, demoStartedRef.current || nowMs());
+    if (frames.length === 0) return;
+    beginPlay(frames, tutorialRef.current !== null);
+  }
+
+  async function steerLive(body: {
+    action: "exclude" | "prioritize" | "request_evidence";
+    hypothesisId?: string;
+    evidenceClass?: "telemetry" | "logs" | "maintenance";
+  }) {
+    if (busyRef.current || demoRef.current) return;
+    busyRef.current = true;
+    setPending(true);
+    setBanner(null);
+    let handoff = false;
+    try {
+      const data = await postJson("/api/steer", body);
+      apply(data);
+      handoff =
+        data.ok !== false &&
+        data.session != null &&
+        steerContinuesInvestigation(data.session, pausedRef.current);
+    } catch (error) {
+      setBanner(error instanceof Error ? error.message : "请求失败");
+    } finally {
+      busyRef.current = false;
+      setPending(false);
+    }
+    if (handoff) void runInvestigationStream();
+  }
+
   function onTutorial() {
     if (!sessionRef.current || busyRef.current) return;
     stopDemo();
@@ -484,35 +518,38 @@ export function InvestigationDesk() {
 
   function onExclude(hypothesisId: string) {
     const current = sessionRef.current;
-    if (!current) return;
+    if (!current || busyRef.current) return;
     if (demoRef.current) {
-      rememberSteer(demoSteer(current, { action: "exclude", hypothesisId, at: new Date().toISOString() }));
+      const steered = demoSteer(current, { action: "exclude", hypothesisId, at: new Date().toISOString() });
+      rememberSteer(steered);
+      continueDemo(steered);
       return;
     }
-    if (busyRef.current) return;
-    void run(() => postJson("/api/steer", { action: "exclude", hypothesisId }));
+    void steerLive({ action: "exclude", hypothesisId });
   }
 
   function onPrioritize(hypothesisId: string) {
     const current = sessionRef.current;
-    if (!current) return;
+    if (!current || busyRef.current) return;
     if (demoRef.current) {
-      rememberSteer(demoSteer(current, { action: "prioritize", hypothesisId, at: new Date().toISOString() }));
+      const steered = demoSteer(current, { action: "prioritize", hypothesisId, at: new Date().toISOString() });
+      rememberSteer(steered);
+      continueDemo(steered);
       return;
     }
-    if (busyRef.current) return;
-    void run(() => postJson("/api/steer", { action: "prioritize", hypothesisId }));
+    void steerLive({ action: "prioritize", hypothesisId });
   }
 
   function onRequest(evidenceClass: "telemetry" | "logs" | "maintenance") {
     const current = sessionRef.current;
-    if (!current) return;
+    if (!current || busyRef.current) return;
     if (demoRef.current) {
-      rememberSteer(demoSteer(current, { action: "request_evidence", evidenceClass, at: new Date().toISOString() }));
+      const steered = demoSteer(current, { action: "request_evidence", evidenceClass, at: new Date().toISOString() });
+      rememberSteer(steered);
+      continueDemo(steered);
       return;
     }
-    if (busyRef.current) return;
-    void run(() => postJson("/api/steer", { action: "request_evidence", evidenceClass }));
+    void steerLive({ action: "request_evidence", evidenceClass });
   }
 
   function onApprove() {
@@ -537,17 +574,6 @@ export function InvestigationDesk() {
       return;
     }
     void run(() => postJson("/api/diagnostic", { decision: "reject" }));
-  }
-
-  function onConclude() {
-    const current = sessionRef.current;
-    if (!current || busyRef.current) return;
-    if (tutorialRef.current && !demoRef.current) return;
-    if (demoRef.current) {
-      remember(demoConclude(current));
-      return;
-    }
-    void run(() => postJson("/api/session", { action: "conclude" }));
   }
 
   function onNote(raw: string) {
@@ -672,7 +698,7 @@ export function InvestigationDesk() {
   const tutorialReady = tutorialStep
     ? tutorialCanAdvance(tutorialStep, { pending: pending || busyRef.current, approved: tutorialApproved })
     : false;
-  const coachLocks = tutorialStep !== null;
+  const coachLocks = tutorialStep !== null && tutorialStep !== "result";
 
   return (
     <main
@@ -715,49 +741,21 @@ export function InvestigationDesk() {
           >
             教程
           </DeskButton>
-          <DeskButton
-            tone="quiet"
-            disabled={!session || pending || paused || tutorialStep !== null}
-            title="合成回放，不调用模型"
-            data-action="demo-playback"
-            onClick={() => playOpening()}
-          >
-            演示回放
-          </DeskButton>
-          <DeskButton
-            tone={moment.focus === "done" && exportReady ? "primary" : "quiet"}
-            disabled={!exportReady}
-            title={exportReady ? "下载 Markdown" : "无假设或证据"}
-            data-action="export-report"
-            onClick={() => {
+          <HandoffExport
+            ready={exportReady}
+            emphasize={moment.focus === "done" && exportReady}
+            onMarkdown={() => {
               if (!session || !canExportReport(session)) return;
               const fileName = downloadInvestigationReport(session, new Date().toISOString(), notes);
               setExportNote(`已下载 ${fileName}`);
             }}
-          >
-            交接稿
-          </DeskButton>
-          <DeskButton
-            tone="quiet"
-            disabled={!exportReady}
-            title={exportReady ? "下载公开会话 JSON" : "无假设或证据"}
-            data-action="export-json"
-            onClick={() => {
+            onJson={() => {
               if (!session || !canExportReport(session)) return;
               const fileName = downloadInvestigationHandoff(session, new Date().toISOString(), notes);
               setExportNote(`已下载 ${fileName}`);
             }}
-          >
-            导出 JSON
-          </DeskButton>
-          <DeskButton
-            tone="quiet"
-            disabled={pending || !session || session.hypotheses.length === 0}
-            onClick={onConclude}
-          >
-            结束调查
-          </DeskButton>
-          <DeskButton tone="quiet" disabled={pending || !session} onClick={onReset}>
+          />
+          <DeskButton tone="quiet" disabled={pending || !session} title="清空这次调查" onClick={onReset}>
             <ResetMark />
             重置
           </DeskButton>
@@ -816,7 +814,6 @@ export function InvestigationDesk() {
           onToggleEvidence={onToggleEvidence}
           onExclude={onExclude}
           onPrioritize={onPrioritize}
-          onRequest={onRequest}
           locked={coachLocks && (tutorialStep == null || tutorialTarget(tutorialStep) !== "work")}
         />
         <TrailColumn
@@ -967,7 +964,6 @@ function WorkColumn({
   onToggleEvidence,
   onExclude,
   onPrioritize,
-  onRequest,
   locked,
 }: {
   session: PublicSession | null;
@@ -980,7 +976,6 @@ function WorkColumn({
   onToggleEvidence: (evidenceId: string) => void;
   onExclude: (hypothesisId: string) => void;
   onPrioritize: (hypothesisId: string) => void;
-  onRequest: (evidenceClass: "telemetry" | "logs" | "maintenance") => void;
   locked?: boolean;
 }) {
   return (
@@ -999,7 +994,6 @@ function WorkColumn({
         onSelectHypothesis={onSelectHypothesis}
         onExclude={onExclude}
         onPrioritize={onPrioritize}
-        onRequest={onRequest}
       />
       <div className="mt-6">
         <EvidenceBoard
@@ -1088,7 +1082,12 @@ function DecisionRail({
               onReject={onReject}
             />
           ) : null}
-          {showSteer ? <RequestButtons pending={pending} onRequest={onRequest} /> : null}
+          {showSteer ? (
+            <div className="flex flex-col items-start gap-1">
+              <RequestButtons pending={pending} onRequest={onRequest} />
+              <EvidenceRequestNote session={session} />
+            </div>
+          ) : null}
           {showRun ? (
             <>
               <DeskButton
@@ -1179,7 +1178,6 @@ function HypothesisBoard({
   onSelectHypothesis,
   onExclude,
   onPrioritize,
-  onRequest,
 }: {
   session: PublicSession | null;
   highlight: DeskDiff | null;
@@ -1189,16 +1187,12 @@ function HypothesisBoard({
   onSelectHypothesis: (hypothesisId: string) => void;
   onExclude: (hypothesisId: string) => void;
   onPrioritize: (hypothesisId: string) => void;
-  onRequest: (evidenceClass: "telemetry" | "logs" | "maintenance") => void;
 }) {
   const hypotheses = session?.hypotheses ?? [];
   const showSkeleton = hypotheses.length === 0 && Boolean(session) && (pending || RUNNING_PHASES.has(session?.phase ?? "idle"));
   return (
     <div className="flex flex-col gap-3">
       <h2 className="nw-muted text-sm font-medium">假设</h2>
-      {hypotheses.length > 0 && session ? (
-        <RequestRow session={session} pending={pending} onRequest={onRequest} />
-      ) : null}
       {hypotheses.length > 0 && session ? (
         <ul className="flex flex-col gap-3">
           {hypotheses.map((item) => (
@@ -1271,11 +1265,11 @@ function HypothesisCard({
           </button>
         </h3>
         <div className="flex flex-wrap items-center gap-2">
+          <DeskButton tone="quiet" className="px-2 py-1 text-xs" disabled={pending || item.status === "priority"} onClick={onPrioritize}>
+            先查这条
+          </DeskButton>
           <DeskButton tone="quiet" className="px-2 py-1 text-xs" disabled={pending || item.status === "excluded"} onClick={onExclude}>
             排除
-          </DeskButton>
-          <DeskButton tone="quiet" className="px-2 py-1 text-xs" disabled={pending || item.status === "priority"} onClick={onPrioritize}>
-            优先调查
           </DeskButton>
           <StatusBadge status={item.status} />
         </div>
@@ -1293,22 +1287,44 @@ function HypothesisCard({
   );
 }
 
-function RequestRow({
-  session,
-  pending,
-  onRequest,
+function EvidenceRequestNote({ session }: { session: PublicSession | null }) {
+  const latest = [...(session?.steering ?? [])].reverse().find((record) => record.action === "request_evidence");
+  if (!latest?.evidenceClass) return null;
+  return <p className="nw-faint text-xs">已请求{EVIDENCE_CLASS_LABEL[latest.evidenceClass]}。</p>;
+}
+
+function HandoffExport({
+  ready,
+  emphasize,
+  onMarkdown,
+  onJson,
 }: {
-  session: PublicSession;
-  pending: boolean;
-  onRequest: (evidenceClass: "telemetry" | "logs" | "maintenance") => void;
+  ready: boolean;
+  emphasize: boolean;
+  onMarkdown: () => void;
+  onJson: () => void;
 }) {
-  const latest = [...session.steering].reverse().find((record) => record.action === "request_evidence");
   return (
-    <div className="flex flex-col gap-2">
-      <RequestButtons pending={pending} onRequest={onRequest} />
-      {latest?.evidenceClass ? (
-        <p className="nw-muted text-sm">先看{EVIDENCE_CLASS_LABEL[latest.evidenceClass]}。</p>
-      ) : null}
+    <div className="flex items-stretch" role="group" aria-label="交接稿">
+      <DeskButton
+        tone={emphasize ? "primary" : "quiet"}
+        disabled={!ready}
+        title={ready ? "下载 Markdown" : "无假设或证据"}
+        data-action="export-report"
+        onClick={onMarkdown}
+      >
+        交接稿
+      </DeskButton>
+      <DeskButton
+        tone="quiet"
+        className="border-l-0 px-2 text-xs"
+        disabled={!ready}
+        title={ready ? "下载公开会话 JSON" : "无假设或证据"}
+        data-action="export-json"
+        onClick={onJson}
+      >
+        JSON
+      </DeskButton>
     </div>
   );
 }
