@@ -124,6 +124,7 @@ pre {
   justify-content: center;
   border-radius: 999px;
   font-size: 12px;
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
 }
 
 .nw-step-current {
@@ -182,8 +183,28 @@ pre {
   background-color: #1a1614;
 }
 
+.nw-rail {
+  background: #101614;
+  border-top: 1px solid var(--nw-line);
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.nw-rail-awaiting {
+  background: #1c1412;
+  border-top-color: var(--nw-pop);
+  box-shadow: inset 0 2px 0 var(--nw-pop);
+}
+
+.nw-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--nw-line-strong) transparent;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .desk-new {
+  .desk-new,
+  .nw-rail,
+  .nw-step {
     animation: none;
+    transition: none;
   }
 }
