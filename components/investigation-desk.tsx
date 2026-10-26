@@ -27,6 +27,14 @@ import {
 import { interpretOperatorNote, type OperatorNote } from "./operator-note";
 import { demoRemainingMs, formatEta, liveRemainingMs, nowMs, postureCopy } from "./run-eta";
 import { canExportReport, downloadInvestigationHandoff, downloadInvestigationReport } from "./investigation-report";
+import { TutorialCoach } from "./tutorial-coach";
+import {
+  tutorialCanAdvance,
+  tutorialCopy,
+  tutorialOnOpeningFrame,
+  tutorialTarget,
+  type TutorialStepId,
+} from "./tutorial";
 import {
   PHASE_LABELS,
   type EvidenceClass,
@@ -57,6 +65,7 @@ type Play = {
   shown: number;
   stepStarted: number;
   frozenInto: number;
+  tutorial: boolean;
 };
 
 const RUNNING_PHASES = new Set<Phase>(["ingesting", "investigating", "testing", "updating", "proposing_test"]);
@@ -99,6 +108,7 @@ export function InvestigationDesk() {
   const [notes, setNotes] = useState<OperatorNote[]>([]);
   const [noteDraft, setNoteDraft] = useState("");
   const [etaLabel, setEtaLabel] = useState<string | null>(null);
+  const [tutorialStep, setTutorialStep] = useState<TutorialStepId | null>(null);
   const [selectedHypothesisId, setSelectedHypothesisId] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const [openEvidenceId, setOpenEvidenceId] = useState<string | null>(null);
@@ -111,6 +121,7 @@ export function InvestigationDesk() {
   const timersRef = useRef<number[]>([]);
   const pausedRef = useRef(false);
   const playRef = useRef<Play | null>(null);
+  const tutorialRef = useRef<TutorialStepId | null>(null);
   const liveStartedRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -253,6 +264,8 @@ export function InvestigationDesk() {
     playRef.current = null;
     demoRef.current = false;
     pausedRef.current = false;
+    tutorialRef.current = null;
+    setTutorialStep(null);
     setDemoOn(false);
     setPaused(false);
     setNotes([]);
@@ -267,6 +280,21 @@ export function InvestigationDesk() {
     playRef.current = null;
     busyRef.current = false;
     setPending(false);
+    setEtaLabel(null);
+  }
+
+  function releaseTutorialHold() {
+    clearDemoTimers();
+    busyRef.current = false;
+    setPending(false);
+    const play = playRef.current;
+    if (play && play.shown < play.frames.length) {
+      pausedRef.current = true;
+      setPaused(true);
+      play.frozenInto = nowMs() - play.stepStarted;
+      setEtaLabel(`${formatEta(demoRemainingMs(play.frames.length, play.shown, play.frozenInto))} · 已暂停`);
+      return;
+    }
     setEtaLabel(null);
   }
 
@@ -288,13 +316,25 @@ export function InvestigationDesk() {
       current.shown += 1;
       current.stepStarted = nowMs();
       current.frozenInto = 0;
+      const guided = current.tutorial ? tutorialRef.current : null;
+      if (guided) {
+        const directed = tutorialOnOpeningFrame(guided, frame);
+        if (directed.step !== guided) {
+          tutorialRef.current = directed.step;
+          setTutorialStep(directed.step);
+        }
+        if (directed.hold) {
+          releaseTutorialHold();
+          return;
+        }
+      }
       if (current.shown >= current.frames.length) finishPlay();
       else arm(DEMO_STEP_MS);
     }, delay);
     timersRef.current = [id];
   }
 
-  function beginPlay(frames: PublicSession[]) {
+  function beginPlay(frames: PublicSession[], tutorial = false) {
     clearDemoTimers();
     const gen = ++demoGen.current;
     demoRef.current = true;
@@ -304,7 +344,7 @@ export function InvestigationDesk() {
     busyRef.current = true;
     setPending(true);
     setBanner(null);
-    playRef.current = { gen, frames, shown: 0, stepStarted: nowMs(), frozenInto: 0 };
+    playRef.current = { gen, frames, shown: 0, stepStarted: nowMs(), frozenInto: 0, tutorial };
     setEtaLabel(formatEta(demoRemainingMs(frames.length, 0, 0)));
     arm(0);
   }
@@ -318,7 +358,7 @@ export function InvestigationDesk() {
   }
 
   // Synthetic playback. Frames use the same PublicSession shape as the NDJSON stream.
-  function playOpening() {
+  function playOpening(tutorial = false) {
     const base = sessionRef.current;
     if (!base || busyRef.current || pausedRef.current) return;
     demoStartedRef.current = nowMs();
@@ -326,13 +366,72 @@ export function InvestigationDesk() {
     setSelectedEvidenceId(null);
     setOpenEvidenceId(null);
     setNotes([]);
-    beginPlay(demoOpening(base, demoStartedRef.current));
+    beginPlay(demoOpening(base, demoStartedRef.current), tutorial);
   }
 
   function playEpilogue() {
     const base = sessionRef.current;
     if (!base || busyRef.current || !demoRef.current || !base.approval) return;
+    if (tutorialRef.current === "gate" || tutorialRef.current === "result") {
+      tutorialRef.current = "result";
+      setTutorialStep("result");
+    }
     beginPlay(demoEpilogue(base, demoStartedRef.current || nowMs()));
+  }
+
+  function onTutorial() {
+    if (!sessionRef.current || busyRef.current) return;
+    stopDemo();
+    tutorialRef.current = "case";
+    setTutorialStep("case");
+    void run(() => postJson("/api/session", { action: "reset" }));
+  }
+
+  function onTutorialNext() {
+    const step = tutorialRef.current;
+    if (!step || busyRef.current) return;
+    if (step === "case") {
+      playOpening(true);
+      return;
+    }
+    if (step === "work") {
+      tutorialRef.current = "log";
+      setTutorialStep("log");
+      return;
+    }
+    if (step === "log") {
+      const play = playRef.current;
+      if (!play || play.shown >= play.frames.length) return;
+      play.tutorial = true;
+      if (pausedRef.current) onResume();
+      return;
+    }
+    if (step === "gate") {
+      playEpilogue();
+      return;
+    }
+    onTutorialExit();
+  }
+
+  function onTutorialSkip() {
+    const step = tutorialRef.current;
+    const play = playRef.current;
+    tutorialRef.current = null;
+    setTutorialStep(null);
+    if (play) play.tutorial = false;
+    if (step === "case") {
+      playOpening();
+      return;
+    }
+    if (demoRef.current && play && pausedRef.current && play.shown < play.frames.length) onResume();
+  }
+
+  function onTutorialExit() {
+    const play = playRef.current;
+    tutorialRef.current = null;
+    setTutorialStep(null);
+    if (play) play.tutorial = false;
+    if (demoRef.current && play && play.shown < play.frames.length && !pausedRef.current) onPause();
   }
 
   function onPause() {
@@ -374,6 +473,8 @@ export function InvestigationDesk() {
 
   function onRun() {
     if (pausedRef.current) return;
+    const guided = tutorialRef.current;
+    if (guided && guided !== "gate" && guided !== "result") return;
     if (demoRef.current) {
       if (sessionRef.current?.approval) playEpilogue();
       return;
@@ -417,6 +518,7 @@ export function InvestigationDesk() {
   function onApprove() {
     const current = sessionRef.current;
     if (!current || busyRef.current) return;
+    if (tutorialRef.current && !demoRef.current) return;
     const chosen = testId || current.proposal?.testId || "";
     if (demoRef.current) {
       if (!chosen) return;
@@ -429,6 +531,7 @@ export function InvestigationDesk() {
   function onReject() {
     const current = sessionRef.current;
     if (!current || busyRef.current) return;
+    if (tutorialRef.current && !demoRef.current) return;
     if (demoRef.current) {
       remember(demoReject(current));
       return;
@@ -439,6 +542,7 @@ export function InvestigationDesk() {
   function onConclude() {
     const current = sessionRef.current;
     if (!current || busyRef.current) return;
+    if (tutorialRef.current && !demoRef.current) return;
     if (demoRef.current) {
       remember(demoConclude(current));
       return;
@@ -549,10 +653,26 @@ export function InvestigationDesk() {
   );
   const awaitingApproval = phase === "awaiting_test_approval";
   const demoBlocksLiveRun = demoOn && !session?.approval;
-  const posture = postureCopy({ pending, paused, phase, focus: moment.focus });
+  const tutorialBlocksRun = tutorialStep !== null && tutorialStep !== "gate" && tutorialStep !== "result";
+  let posture = postureCopy({ pending, paused, phase, focus: moment.focus });
+  if (tutorialStep) {
+    if ((awaitingApproval || moment.focus === "approve") && !session?.approval) posture = "等待你批准";
+    else if (tutorialStep === "case") posture = "教程";
+    else if (paused) posture = "教程停在这一帧";
+    else if (pending) posture = "教程回放";
+  }
   const detailWithEta = etaLabel && pending ? [detail, etaLabel].filter(Boolean).join(" · ") : detail;
-  const showPause = pending && !paused;
-  const showResume = paused;
+  const showPause = pending && !paused && tutorialStep === null;
+  const showResume = paused && tutorialStep === null;
+  const tutorialApproved = Boolean(session?.approval);
+  const tutorialRejected = tutorialStep === "gate" && !tutorialApproved && session?.proposal == null;
+  const tutorialView = tutorialStep
+    ? tutorialCopy(tutorialStep, { pending, approved: tutorialApproved, rejected: tutorialRejected })
+    : null;
+  const tutorialReady = tutorialStep
+    ? tutorialCanAdvance(tutorialStep, { pending: pending || busyRef.current, approved: tutorialApproved })
+    : false;
+  const coachLocks = tutorialStep !== null;
 
   return (
     <main
@@ -560,12 +680,16 @@ export function InvestigationDesk() {
       data-desk-layout="wide"
       data-desk-focus={moment.focus}
       data-phase={phase}
-      data-demo={demoOn ? "playback" : "off"}
+      data-demo={tutorialStep ? "tutorial" : demoOn ? "playback" : "off"}
+      data-tutorial={tutorialStep ?? "off"}
       data-paused={paused ? "true" : "false"}
       data-posture={posture}
       aria-busy={pending}
     >
-      <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b border-[var(--nw-line)] px-4 py-3">
+      <header
+        className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b border-[var(--nw-line)] px-4 py-3"
+        inert={coachLocks ? true : undefined}
+      >
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <p className="nw-kicker">事件调查台</p>
@@ -576,17 +700,27 @@ export function InvestigationDesk() {
               </span>
             ) : null}
             <span className={cx("nw-badge", awaitingApproval && "nw-badge-priority")}>{PHASE_LABELS[phase]}</span>
-            {demoOn ? <span className="nw-badge">合成回放</span> : null}
+            {tutorialStep ? <span className="nw-badge">教程</span> : null}
+            {demoOn && !tutorialStep ? <span className="nw-badge">合成回放</span> : null}
           </div>
-          <p className="nw-faint mt-1 text-xs">合成 QKD 事件 · 代理协助调查 · 人批准风险步骤</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <DeskButton
             tone="quiet"
-            disabled={!session || pending || paused}
+            disabled={!session || pending || tutorialStep !== null}
+            title="带说明的合成回放，不调用模型"
+            data-action="tutorial"
+            aria-pressed={tutorialStep !== null}
+            onClick={onTutorial}
+          >
+            教程
+          </DeskButton>
+          <DeskButton
+            tone="quiet"
+            disabled={!session || pending || paused || tutorialStep !== null}
             title="合成回放，不调用模型"
             data-action="demo-playback"
-            onClick={playOpening}
+            onClick={() => playOpening()}
           >
             演示回放
           </DeskButton>
@@ -637,6 +771,7 @@ export function InvestigationDesk() {
         )}
         data-agency-strip="true"
         data-eta={etaLabel ?? ""}
+        inert={coachLocks ? true : undefined}
       >
         <p className="min-w-0 text-sm">
           <span>{posture}</span>
@@ -657,7 +792,7 @@ export function InvestigationDesk() {
       </div>
 
       {exportNote || strayBanner || loadError ? (
-        <div className="flex shrink-0 flex-col gap-2 border-b border-[var(--nw-line)] px-4 py-2">
+        <div className="flex shrink-0 flex-col gap-2 border-b border-[var(--nw-line)] px-4 py-2" inert={coachLocks ? true : undefined}>
           {exportNote ? (
             <p className="nw-muted text-sm" role="status">
               {exportNote}
@@ -669,7 +804,7 @@ export function InvestigationDesk() {
       ) : null}
 
       <div className="nw-scroll min-h-0 flex-1 overflow-y-auto lg:grid lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)_minmax(19rem,24rem)] lg:overflow-hidden">
-        <CaseColumn session={session} />
+        <CaseColumn session={session} locked={coachLocks && tutorialTarget(tutorialStep ?? "case") !== "case"} />
         <WorkColumn
           session={session}
           highlight={highlight}
@@ -682,8 +817,20 @@ export function InvestigationDesk() {
           onExclude={onExclude}
           onPrioritize={onPrioritize}
           onRequest={onRequest}
+          locked={coachLocks && (tutorialStep == null || tutorialTarget(tutorialStep) !== "work")}
         />
-        <TrailColumn session={session} highlight={highlight} pending={pending} phase={phase} etaLabel={etaLabel} notes={notes} noteDraft={noteDraft} onDraft={setNoteDraft} onNote={onNote} />
+        <TrailColumn
+          session={session}
+          highlight={highlight}
+          pending={pending}
+          phase={phase}
+          etaLabel={etaLabel}
+          notes={notes}
+          noteDraft={noteDraft}
+          onDraft={setNoteDraft}
+          onNote={onNote}
+          locked={coachLocks && (tutorialStep == null || tutorialTarget(tutorialStep) !== "log")}
+        />
       </div>
 
       <DecisionRail
@@ -699,21 +846,36 @@ export function InvestigationDesk() {
         showSteer={showSteer}
         awaitingApproval={awaitingApproval}
         demoBlocksLiveRun={demoBlocksLiveRun}
+        tutorialBlocksRun={tutorialBlocksRun}
+        locked={coachLocks && (tutorialStep == null || tutorialTarget(tutorialStep) !== "hitl")}
         onTestId={setTestId}
         onRun={onRun}
         onApprove={onApprove}
         onReject={onReject}
         onRequest={onRequest}
       />
+      {tutorialStep && tutorialView ? (
+        <TutorialCoach
+          step={tutorialStep}
+          copy={tutorialView}
+          canAdvance={tutorialReady}
+          layoutKey={`${phase}:${session?.evidence.length ?? 0}:${session?.hypotheses.length ?? 0}:${session?.trace.length ?? 0}:${paused ? "paused" : "run"}`}
+          onNext={onTutorialNext}
+          onSkip={onTutorialSkip}
+          onExit={onTutorialExit}
+        />
+      ) : null}
     </main>
   );
 }
 
-function CaseColumn({ session }: { session: PublicSession | null }) {
+function CaseColumn({ session, locked }: { session: PublicSession | null; locked?: boolean }) {
   return (
     <section
       className="nw-scroll border-b border-[var(--nw-line)] px-4 py-4 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-b-0"
       aria-label="链路与症状"
+      data-tutorial-target="case"
+      inert={locked ? true : undefined}
     >
       <h2 className="nw-muted text-sm font-medium">链路</h2>
       {session ? <LinkDiagram incident={session.incident} /> : null}
@@ -730,13 +892,13 @@ function CaseColumn({ session }: { session: PublicSession | null }) {
           </ul>
           <dl className="mt-5 flex flex-col gap-3 text-sm">
             <div>
-              <dt className="nw-faint text-xs">时间窗</dt>
+              <dt className="nw-faint text-xs">观察窗</dt>
               <dd className="mt-1">
                 {shortTime(session.incident.timeWindow.from)} – {shortTime(session.incident.timeWindow.to)}
               </dd>
             </div>
             <div>
-              <dt className="nw-faint text-xs">打开于</dt>
+              <dt className="nw-faint text-xs">开单</dt>
               <dd className="mt-1">
                 {shortTime(session.incident.openedAt)} · {session.incident.id}
               </dd>
@@ -746,7 +908,6 @@ function CaseColumn({ session }: { session: PublicSession | null }) {
               <dd className="mt-1 leading-5">{session.incident.maintenanceWindowSummary}</dd>
             </div>
           </dl>
-          <p className="nw-faint mt-5 text-xs leading-5">{session.incident.disclaimer}</p>
         </>
       ) : null}
     </section>
@@ -807,6 +968,7 @@ function WorkColumn({
   onExclude,
   onPrioritize,
   onRequest,
+  locked,
 }: {
   session: PublicSession | null;
   highlight: DeskDiff | null;
@@ -819,11 +981,14 @@ function WorkColumn({
   onExclude: (hypothesisId: string) => void;
   onPrioritize: (hypothesisId: string) => void;
   onRequest: (evidenceClass: "telemetry" | "logs" | "maintenance") => void;
+  locked?: boolean;
 }) {
   return (
     <section
       className="nw-scroll border-b border-[var(--nw-line)] px-4 py-4 lg:min-h-0 lg:overflow-y-auto lg:border-b-0"
       aria-label="假设与证据"
+      data-tutorial-target="work"
+      inert={locked ? true : undefined}
     >
       <HypothesisBoard
         session={session}
@@ -864,6 +1029,8 @@ function DecisionRail({
   showSteer,
   awaitingApproval,
   demoBlocksLiveRun,
+  tutorialBlocksRun,
+  locked,
   onTestId,
   onRun,
   onApprove,
@@ -882,6 +1049,8 @@ function DecisionRail({
   showSteer: boolean;
   awaitingApproval: boolean;
   demoBlocksLiveRun: boolean;
+  tutorialBlocksRun: boolean;
+  locked?: boolean;
   onTestId: (id: string) => void;
   onRun: () => void;
   onApprove: () => void;
@@ -893,9 +1062,11 @@ function DecisionRail({
     <footer
       className={cx("nw-rail shrink-0 px-4 py-3", awaitingApproval && "nw-rail-awaiting")}
       data-hitl-rail="true"
+      data-tutorial-target="hitl"
       data-awaiting-approval={awaitingApproval ? "true" : "false"}
       data-phase={phase}
       aria-label="决策"
+      inert={locked ? true : undefined}
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0 lg:max-w-xl" aria-live="polite">
@@ -923,7 +1094,7 @@ function DecisionRail({
               <DeskButton
                 tone="primary"
                 className="px-4 py-2"
-                disabled={pending || !session || demoBlocksLiveRun}
+                disabled={pending || !session || demoBlocksLiveRun || tutorialBlocksRun}
                 title={demoBlocksLiveRun ? "合成回放中。要走真实接口，先重置。" : undefined}
                 onClick={onRun}
               >
@@ -1340,6 +1511,7 @@ function TrailColumn({
   noteDraft,
   onDraft,
   onNote,
+  locked,
 }: {
   session: PublicSession | null;
   highlight: DeskDiff | null;
@@ -1350,12 +1522,13 @@ function TrailColumn({
   noteDraft: string;
   onDraft: (value: string) => void;
   onNote: (text: string) => void;
+  locked?: boolean;
 }) {
   const trail = session?.phaseTrail ?? [];
   const path = trail.length > 1 ? trail.map((item) => PHASE_LABELS[item]).join(" → ") : "";
   const count = session?.trace.length ?? 0;
   return (
-    <aside className="flex flex-col lg:min-h-0 lg:overflow-hidden" aria-label="运行日志">
+    <aside className="flex flex-col lg:min-h-0 lg:overflow-hidden" aria-label="运行日志" data-tutorial-target="log" inert={locked ? true : undefined}>
       <div className="shrink-0 border-b border-[var(--nw-line)] px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="nw-muted text-sm font-medium">运行</h2>
