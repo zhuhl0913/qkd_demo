@@ -13,10 +13,20 @@ import {
   type DeskDiff,
   type DeskFocus,
 } from "./desk-loop";
+import {
+  DEMO_STEP_MS,
+  demoApprove,
+  demoConclude,
+  demoEpilogue,
+  demoOpening,
+  demoReject,
+  demoSteer,
+} from "./demo-playback";
 import { canExportReport, downloadInvestigationReport } from "./investigation-report";
 import {
   PHASE_LABELS,
   type EvidenceClass,
+  type EvidenceItem,
   type Hypothesis,
   type HypothesisStatus,
   type Phase,
@@ -72,9 +82,17 @@ export function InvestigationDesk() {
   const [testId, setTestId] = useState("");
   const [highlight, setHighlight] = useState<DeskDiff | null>(null);
   const [exportNote, setExportNote] = useState<string | null>(null);
+  const [demoOn, setDemoOn] = useState(false);
+  const [selectedHypothesisId, setSelectedHypothesisId] = useState<string | null>(null);
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
+  const [openEvidenceId, setOpenEvidenceId] = useState<string | null>(null);
   const sessionRef = useRef<PublicSession | null>(null);
   const busyRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const demoRef = useRef(false);
+  const demoGen = useRef(0);
+  const demoStartedRef = useRef(0);
+  const timersRef = useRef<number[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +127,9 @@ export function InvestigationDesk() {
     if (diff || cleared) setHighlight(diff);
     sessionRef.current = next;
     setSession(next);
+    setSelectedHypothesisId((id) => (id && next.hypotheses.some((item) => item.id === id) ? id : null));
+    setSelectedEvidenceId((id) => (id && next.evidence.some((item) => item.evidenceId === id) ? id : null));
+    setOpenEvidenceId((id) => (id && next.evidence.some((item) => item.evidenceId === id) ? id : null));
     setExportNote(null);
     setTestId((current) => {
       if (next.proposal?.testId) return next.proposal.testId;
@@ -187,8 +208,152 @@ export function InvestigationDesk() {
     }
   }
 
+  function clearDemoTimers() {
+    for (const id of timersRef.current) window.clearTimeout(id);
+    timersRef.current = [];
+  }
+
+  function stopDemo() {
+    demoGen.current += 1;
+    clearDemoTimers();
+    demoRef.current = false;
+    setDemoOn(false);
+    busyRef.current = false;
+    setPending(false);
+  }
+
+  function playFrames(frames: PublicSession[]) {
+    clearDemoTimers();
+    const gen = ++demoGen.current;
+    demoRef.current = true;
+    setDemoOn(true);
+    busyRef.current = true;
+    setPending(true);
+    setBanner(null);
+    timersRef.current = frames.map((frame, index) =>
+      window.setTimeout(() => {
+        if (demoGen.current !== gen) return;
+        remember(frame);
+        if (index === frames.length - 1) {
+          busyRef.current = false;
+          setPending(false);
+        }
+      }, index * DEMO_STEP_MS),
+    );
+  }
+
+  // Synthetic playback. Frames use the same PublicSession shape as the NDJSON stream.
+  function playOpening() {
+    const base = sessionRef.current;
+    if (!base || busyRef.current) return;
+    demoStartedRef.current = Date.now();
+    setSelectedHypothesisId(null);
+    setSelectedEvidenceId(null);
+    setOpenEvidenceId(null);
+    playFrames(demoOpening(base, demoStartedRef.current));
+  }
+
+  function playEpilogue() {
+    const base = sessionRef.current;
+    if (!base || busyRef.current || !demoRef.current || !base.approval) return;
+    playFrames(demoEpilogue(base, demoStartedRef.current || Date.now()));
+  }
+
+  function onRun() {
+    if (demoRef.current) {
+      if (sessionRef.current?.approval) playEpilogue();
+      return;
+    }
+    void runInvestigationStream();
+  }
+
+  function onExclude(hypothesisId: string) {
+    const current = sessionRef.current;
+    if (!current || busyRef.current) return;
+    if (demoRef.current) {
+      remember(demoSteer(current, { action: "exclude", hypothesisId, at: new Date().toISOString() }));
+      return;
+    }
+    void run(() => postJson("/api/steer", { action: "exclude", hypothesisId }));
+  }
+
+  function onPrioritize(hypothesisId: string) {
+    const current = sessionRef.current;
+    if (!current || busyRef.current) return;
+    if (demoRef.current) {
+      remember(demoSteer(current, { action: "prioritize", hypothesisId, at: new Date().toISOString() }));
+      return;
+    }
+    void run(() => postJson("/api/steer", { action: "prioritize", hypothesisId }));
+  }
+
+  function onRequest(evidenceClass: "telemetry" | "logs" | "maintenance") {
+    const current = sessionRef.current;
+    if (!current || busyRef.current) return;
+    if (demoRef.current) {
+      remember(demoSteer(current, { action: "request_evidence", evidenceClass, at: new Date().toISOString() }));
+      return;
+    }
+    void run(() => postJson("/api/steer", { action: "request_evidence", evidenceClass }));
+  }
+
+  function onApprove() {
+    const current = sessionRef.current;
+    if (!current || busyRef.current) return;
+    const chosen = testId || current.proposal?.testId || "";
+    if (demoRef.current) {
+      if (!chosen) return;
+      remember(demoApprove(current, chosen, new Date().toISOString()));
+      return;
+    }
+    void run(() => postJson("/api/diagnostic", { decision: "approve", testId: chosen }));
+  }
+
+  function onReject() {
+    const current = sessionRef.current;
+    if (!current || busyRef.current) return;
+    if (demoRef.current) {
+      remember(demoReject(current));
+      return;
+    }
+    void run(() => postJson("/api/diagnostic", { decision: "reject" }));
+  }
+
+  function onConclude() {
+    const current = sessionRef.current;
+    if (!current || busyRef.current) return;
+    if (demoRef.current) {
+      remember(demoConclude(current));
+      return;
+    }
+    void run(() => postJson("/api/session", { action: "conclude" }));
+  }
+
+  function onReset() {
+    stopDemo();
+    void run(() => postJson("/api/session", { action: "reset" }));
+  }
+
+  function onSelectHypothesis(hypothesisId: string) {
+    setSelectedHypothesisId(hypothesisId);
+  }
+
+  function onToggleEvidence(evidenceId: string) {
+    setOpenEvidenceId((current) => (current === evidenceId ? null : evidenceId));
+    setSelectedEvidenceId(evidenceId);
+    const current = sessionRef.current;
+    if (!current) return;
+    const related = current.hypotheses.filter((item) => item.supportingEvidenceIds.includes(evidenceId));
+    const focus = related.find((item) => item.status === "priority") ?? related[0];
+    if (focus) setSelectedHypothesisId(focus.id);
+  }
+
   useEffect(() => {
-    return () => abortRef.current?.abort();
+    return () => {
+      demoGen.current += 1;
+      for (const id of timersRef.current) window.clearTimeout(id);
+      abortRef.current?.abort();
+    };
   }, []);
 
   const phase: Phase = session?.phase ?? "idle";
@@ -200,6 +365,7 @@ export function InvestigationDesk() {
   const showApprove = moment.focus === "approve";
   const keyNote =
     session &&
+    !demoOn &&
     !session.provider.configured &&
     (moment.focus === "run" || moment.focus === "rerun") &&
     !moment.detail.includes("密钥") &&
@@ -216,6 +382,7 @@ export function InvestigationDesk() {
       (moment.focus === "steer" || (moment.focus === "done" && phase !== "concluded")),
   );
   const awaitingApproval = phase === "awaiting_test_approval";
+  const demoBlocksLiveRun = demoOn && !session?.approval;
 
   return (
     <main
@@ -223,6 +390,7 @@ export function InvestigationDesk() {
       data-desk-layout="wide"
       data-desk-focus={moment.focus}
       data-phase={phase}
+      data-demo={demoOn ? "playback" : "off"}
       aria-busy={pending}
     >
       <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b border-[var(--nw-line)] px-4 py-3">
@@ -236,10 +404,20 @@ export function InvestigationDesk() {
               </span>
             ) : null}
             <span className={cx("nw-badge", awaitingApproval && "nw-badge-priority")}>{PHASE_LABELS[phase]}</span>
+            {demoOn ? <span className="nw-badge">合成回放</span> : null}
           </div>
           <p className="nw-faint mt-1 text-xs">合成 QKD 事件 · 代理协助调查 · 人批准风险步骤</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <DeskButton
+            tone="quiet"
+            disabled={!session || pending}
+            title="合成回放，不调用模型"
+            data-action="demo-playback"
+            onClick={playOpening}
+          >
+            演示回放
+          </DeskButton>
           <DeskButton
             tone={moment.focus === "done" && exportReady ? "primary" : "quiet"}
             disabled={!exportReady}
@@ -256,15 +434,11 @@ export function InvestigationDesk() {
           <DeskButton
             tone="quiet"
             disabled={pending || !session || session.hypotheses.length === 0}
-            onClick={() => run(() => postJson("/api/session", { action: "conclude" }))}
+            onClick={onConclude}
           >
             结束调查
           </DeskButton>
-          <DeskButton
-            tone="quiet"
-            disabled={pending || !session}
-            onClick={() => run(() => postJson("/api/session", { action: "reset" }))}
-          >
+          <DeskButton tone="quiet" disabled={pending || !session} onClick={onReset}>
             <ResetMark />
             重置
           </DeskButton>
@@ -289,11 +463,14 @@ export function InvestigationDesk() {
           session={session}
           highlight={highlight}
           pending={pending}
-          onExclude={(hypothesisId) => run(() => postJson("/api/steer", { action: "exclude", hypothesisId }))}
-          onPrioritize={(hypothesisId) => run(() => postJson("/api/steer", { action: "prioritize", hypothesisId }))}
-          onRequest={(evidenceClass) =>
-            run(() => postJson("/api/steer", { action: "request_evidence", evidenceClass }))
-          }
+          selectedHypothesisId={selectedHypothesisId}
+          selectedEvidenceId={selectedEvidenceId}
+          openEvidenceId={openEvidenceId}
+          onSelectHypothesis={onSelectHypothesis}
+          onToggleEvidence={onToggleEvidence}
+          onExclude={onExclude}
+          onPrioritize={onPrioritize}
+          onRequest={onRequest}
         />
         <TrailColumn session={session} highlight={highlight} pending={pending} phase={phase} />
       </div>
@@ -310,13 +487,12 @@ export function InvestigationDesk() {
         showRun={showRun}
         showSteer={showSteer}
         awaitingApproval={awaitingApproval}
+        demoBlocksLiveRun={demoBlocksLiveRun}
         onTestId={setTestId}
-        onRun={() => void runInvestigationStream()}
-        onApprove={() => run(() => postJson("/api/diagnostic", { decision: "approve", testId }))}
-        onReject={() => run(() => postJson("/api/diagnostic", { decision: "reject" }))}
-        onRequest={(evidenceClass) =>
-          run(() => postJson("/api/steer", { action: "request_evidence", evidenceClass }))
-        }
+        onRun={onRun}
+        onApprove={onApprove}
+        onReject={onReject}
+        onRequest={onRequest}
       />
     </main>
   );
@@ -412,6 +588,11 @@ function WorkColumn({
   session,
   highlight,
   pending,
+  selectedHypothesisId,
+  selectedEvidenceId,
+  openEvidenceId,
+  onSelectHypothesis,
+  onToggleEvidence,
   onExclude,
   onPrioritize,
   onRequest,
@@ -419,6 +600,11 @@ function WorkColumn({
   session: PublicSession | null;
   highlight: DeskDiff | null;
   pending: boolean;
+  selectedHypothesisId: string | null;
+  selectedEvidenceId: string | null;
+  openEvidenceId: string | null;
+  onSelectHypothesis: (hypothesisId: string) => void;
+  onToggleEvidence: (evidenceId: string) => void;
   onExclude: (hypothesisId: string) => void;
   onPrioritize: (hypothesisId: string) => void;
   onRequest: (evidenceClass: "telemetry" | "logs" | "maintenance") => void;
@@ -432,12 +618,23 @@ function WorkColumn({
         session={session}
         highlight={highlight}
         pending={pending}
+        selectedHypothesisId={selectedHypothesisId}
+        selectedEvidenceId={selectedEvidenceId}
+        onSelectHypothesis={onSelectHypothesis}
         onExclude={onExclude}
         onPrioritize={onPrioritize}
         onRequest={onRequest}
       />
       <div className="mt-6">
-        <EvidenceBoard session={session} highlight={highlight} />
+        <EvidenceBoard
+          session={session}
+          highlight={highlight}
+          pending={pending}
+          selectedHypothesisId={selectedHypothesisId}
+          selectedEvidenceId={selectedEvidenceId}
+          openEvidenceId={openEvidenceId}
+          onToggleEvidence={onToggleEvidence}
+        />
       </div>
     </section>
   );
@@ -455,6 +652,7 @@ function DecisionRail({
   showRun,
   showSteer,
   awaitingApproval,
+  demoBlocksLiveRun,
   onTestId,
   onRun,
   onApprove,
@@ -472,6 +670,7 @@ function DecisionRail({
   showRun: boolean;
   showSteer: boolean;
   awaitingApproval: boolean;
+  demoBlocksLiveRun: boolean;
   onTestId: (id: string) => void;
   onRun: () => void;
   onApprove: () => void;
@@ -510,7 +709,13 @@ function DecisionRail({
           {showSteer ? <RequestButtons pending={pending} onRequest={onRequest} /> : null}
           {showRun ? (
             <>
-              <DeskButton tone="primary" className="px-4 py-2" disabled={pending || !session} onClick={onRun}>
+              <DeskButton
+                tone="primary"
+                className="px-4 py-2"
+                disabled={pending || !session || demoBlocksLiveRun}
+                title={demoBlocksLiveRun ? "合成回放中。要走真实接口，先重置。" : undefined}
+                onClick={onRun}
+              >
                 {runLabel}
               </DeskButton>
               {focus === "rerun" ? (
@@ -587,6 +792,9 @@ function HypothesisBoard({
   session,
   highlight,
   pending,
+  selectedHypothesisId,
+  selectedEvidenceId,
+  onSelectHypothesis,
   onExclude,
   onPrioritize,
   onRequest,
@@ -594,11 +802,15 @@ function HypothesisBoard({
   session: PublicSession | null;
   highlight: DeskDiff | null;
   pending: boolean;
+  selectedHypothesisId: string | null;
+  selectedEvidenceId: string | null;
+  onSelectHypothesis: (hypothesisId: string) => void;
   onExclude: (hypothesisId: string) => void;
   onPrioritize: (hypothesisId: string) => void;
   onRequest: (evidenceClass: "telemetry" | "logs" | "maintenance") => void;
 }) {
   const hypotheses = session?.hypotheses ?? [];
+  const showSkeleton = hypotheses.length === 0 && Boolean(session) && (pending || RUNNING_PHASES.has(session?.phase ?? "idle"));
   return (
     <div className="flex flex-col gap-3">
       <h2 className="nw-muted text-sm font-medium">假设</h2>
@@ -614,12 +826,16 @@ function HypothesisBoard({
               session={session}
               highlight={highlight}
               pending={pending}
+              selected={item.id === selectedHypothesisId}
+              linked={Boolean(selectedEvidenceId) && item.supportingEvidenceIds.includes(selectedEvidenceId ?? "") && item.id !== selectedHypothesisId}
+              onSelect={() => onSelectHypothesis(item.id)}
               onExclude={() => onExclude(item.id)}
               onPrioritize={() => onPrioritize(item.id)}
             />
           ))}
         </ul>
       ) : null}
+      {showSkeleton && session ? <DeskSkeleton label={PHASE_LABELS[session.phase]} /> : null}
     </div>
   );
 }
@@ -629,6 +845,9 @@ function HypothesisCard({
   session,
   highlight,
   pending,
+  selected,
+  linked,
+  onSelect,
   onExclude,
   onPrioritize,
 }: {
@@ -636,6 +855,9 @@ function HypothesisCard({
   session: PublicSession;
   highlight: DeskDiff | null;
   pending: boolean;
+  selected: boolean;
+  linked: boolean;
+  onSelect: () => void;
   onExclude: () => void;
   onPrioritize: () => void;
 }) {
@@ -651,13 +873,21 @@ function HypothesisCard({
     <li
       className={cx(
         "nw-panel p-3",
-        marked && "desk-new border-[var(--nw-pop)]",
-        !marked && item.status === "priority" && "border-[var(--nw-pop)]",
+        selected && "border-[var(--nw-pop)] bg-[#1a1614]",
+        !selected && linked && "border-[var(--nw-line-strong)]",
+        marked && "desk-new",
+        !selected && !linked && !marked && item.status === "priority" && "border-[var(--nw-pop)]",
         item.status === "excluded" && "opacity-55",
       )}
+      data-hypothesis={item.id}
+      data-selected={selected ? "true" : "false"}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <h3 className={cx("min-w-0 text-base font-medium", item.status === "excluded" && "line-through")}>{item.title}</h3>
+        <h3 className={cx("min-w-0 text-base font-medium", item.status === "excluded" && "line-through")}>
+          <button type="button" className="text-left" aria-pressed={selected} onClick={onSelect}>
+            {item.title}
+          </button>
+        </h3>
         <div className="flex flex-wrap items-center gap-2">
           <DeskButton tone="quiet" className="px-2 py-1 text-xs" disabled={pending || item.status === "excluded"} onClick={onExclude}>
             排除
@@ -675,8 +905,8 @@ function HypothesisCard({
       ) : null}
       {isNew ? <p className="nw-pop-text mt-2 text-sm">新假设</p> : null}
       {!isNew && !change && textChanged ? <p className="nw-pop-text mt-2 text-sm">依据已更新</p> : null}
-      <p className="mt-2 text-sm leading-6">{item.rationale}</p>
-      {evidenceNames.length > 0 ? <p className="nw-muted mt-2 text-sm">依据 {evidenceNames.join("、")}</p> : null}
+      <p className={cx("mt-2 text-sm leading-6", !selected && "line-clamp-2")}>{item.rationale}</p>
+      {selected && evidenceNames.length > 0 ? <p className="nw-muted mt-2 text-sm">依据 {evidenceNames.join("、")}</p> : null}
     </li>
   );
 }
@@ -719,46 +949,117 @@ function RequestButtons({
   );
 }
 
-function EvidenceBoard({ session, highlight }: { session: PublicSession | null; highlight: DeskDiff | null }) {
+// Accordion with progressive disclosure: compact summary, expand for provenance and body.
+function EvidenceBoard({
+  session,
+  highlight,
+  pending,
+  selectedHypothesisId,
+  selectedEvidenceId,
+  openEvidenceId,
+  onToggleEvidence,
+}: {
+  session: PublicSession | null;
+  highlight: DeskDiff | null;
+  pending: boolean;
+  selectedHypothesisId: string | null;
+  selectedEvidenceId: string | null;
+  openEvidenceId: string | null;
+  onToggleEvidence: (evidenceId: string) => void;
+}) {
   const evidence = session?.evidence ?? [];
   const fresh = new Set([...(highlight?.evidenceIds ?? []), ...(highlight?.updatedEvidenceIds ?? [])]);
+  const selectedHypothesis = session?.hypotheses.find((item) => item.id === selectedHypothesisId);
+  const showSkeleton = evidence.length === 0 && Boolean(session) && (pending || RUNNING_PHASES.has(session?.phase ?? "idle"));
   return (
     <div className="flex flex-col gap-3">
       <h2 className="nw-muted text-sm font-medium">证据</h2>
       {evidence.length === 0 || !session ? null : (
         <ul className="flex flex-col gap-3">
-          {evidence.map((item) => {
-            const isFresh = fresh.has(item.evidenceId);
-            const diagnostic = item.evidenceClass === "diagnostic";
-            const long = item.body.length > 280 && !diagnostic && !isFresh;
-            return (
-              <li key={item.evidenceId} className={cx("nw-panel p-3", isFresh && "desk-new border-[var(--nw-pop)]")}>
-                <div className="flex items-start gap-3">
-                  <EvidenceGlyph evidenceClass={item.evidenceClass} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-3">
-                      <h3 className="font-medium">{item.title}</h3>
-                      <span className="nw-faint shrink-0 text-xs">
-                        {EVIDENCE_CLASS_LABEL[item.evidenceClass]}
-                        {isFresh ? (diagnostic ? " · 新证" : " · 新") : ""}
-                      </span>
-                    </div>
-                    <MiniLink incident={session.incident} />
-                    {long ? (
-                      <details className="mt-2">
-                        <summary className="text-sm">{item.body.split("\n")[0]}</summary>
-                        <pre className="mt-2 text-sm">{item.body}</pre>
-                      </details>
-                    ) : (
-                      <pre className="mt-2 text-sm">{item.body}</pre>
-                    )}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
+          {evidence.map((item) => (
+            <EvidenceCard
+              key={item.evidenceId}
+              item={item}
+              session={session}
+              fresh={fresh.has(item.evidenceId)}
+              selected={item.evidenceId === selectedEvidenceId}
+              linked={selectedHypothesis?.supportingEvidenceIds.includes(item.evidenceId) ?? false}
+              open={item.evidenceId === openEvidenceId}
+              onToggle={() => onToggleEvidence(item.evidenceId)}
+            />
+          ))}
         </ul>
       )}
+      {showSkeleton ? <DeskSkeleton label="" /> : null}
+    </div>
+  );
+}
+
+function EvidenceCard({
+  item,
+  session,
+  fresh,
+  selected,
+  linked,
+  open,
+  onToggle,
+}: {
+  item: EvidenceItem;
+  session: PublicSession;
+  fresh: boolean;
+  selected: boolean;
+  linked: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const diagnostic = item.evidenceClass === "diagnostic";
+  const summary = item.body.split("\n")[0] ?? "";
+  const provenance = evidenceProvenance(session, item);
+  return (
+    <li
+      className={cx(
+        "nw-panel",
+        selected && "border-[var(--nw-pop)] bg-[#1a1614]",
+        !selected && linked && "border-[var(--nw-line-strong)]",
+        fresh && "desk-new",
+      )}
+      data-evidence={item.evidenceId}
+      data-open={open ? "true" : "false"}
+      data-selected={selected ? "true" : "false"}
+    >
+      <button type="button" className="flex w-full items-start gap-3 p-3 text-left" aria-expanded={open} onClick={onToggle}>
+        <EvidenceGlyph evidenceClass={item.evidenceClass} />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-start justify-between gap-3">
+            <span className="font-medium">{item.title}</span>
+            <span className="nw-faint shrink-0 text-xs">
+              {EVIDENCE_CLASS_LABEL[item.evidenceClass]}
+              {fresh ? (diagnostic ? " · 新证" : " · 新") : ""}
+            </span>
+          </span>
+          {open ? null : <span className="nw-muted mt-1 line-clamp-1 block text-sm">{summary}</span>}
+        </span>
+        <span aria-hidden="true" className="nw-faint pt-1 text-xs">
+          {open ? "▾" : "▸"}
+        </span>
+      </button>
+      {open ? (
+        <div className="border-t border-[var(--nw-line)] px-3 pt-2 pb-3 pl-12">
+          {provenance ? <p className="nw-faint font-mono text-[11px]">{provenance}</p> : null}
+          <pre className="mt-2 text-sm">{item.body}</pre>
+          <MiniLink incident={session.incident} />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function DeskSkeleton({ label }: { label: string }) {
+  return (
+    <div className="nw-panel p-3" aria-hidden="true">
+      {label ? <span className="nw-badge">{label}</span> : null}
+      <div className="mt-3 h-3 w-2/3 bg-[var(--nw-line)]" />
+      <div className="mt-2 h-3 w-1/2 bg-[var(--nw-line)]" />
     </div>
   );
 }
@@ -866,11 +1167,7 @@ function RunLog({
 }) {
   const trace = [...(session?.trace ?? [])].sort((left, right) => left.at.localeCompare(right.at));
   const fresh = new Set(highlight?.traceIds ?? []);
-  const origin = trace.reduce<number | null>((earliest, event) => {
-    const time = Date.parse(event.at);
-    if (Number.isNaN(time)) return earliest;
-    return earliest === null || time < earliest ? time : earliest;
-  }, null);
+  const origin = traceOrigin(trace);
   const showLive = pending && phase !== "idle";
   const showError = !pending && phase === "error" && Boolean(session?.error);
   if (trace.length === 0 && !showLive && !showError) return null;
@@ -901,8 +1198,7 @@ function RunLog({
 function ToolRow({ event, origin, fresh }: { event: TraceEvent; origin: number | null; fresh: boolean }) {
   const summary = briefInput(event.input);
   const failed = event.status === "error";
-  const time = Date.parse(event.at);
-  const stamp = origin === null || Number.isNaN(time) ? "—" : formatOffset(time - origin);
+  const stamp = formatStamp(event.at, origin);
   return (
     <li
       className={cx(
@@ -927,6 +1223,37 @@ function ToolRow({ event, origin, fresh }: { event: TraceEvent; origin: number |
       </div>
     </li>
   );
+}
+
+function evidenceProvenance(session: PublicSession, item: EvidenceItem): string | null {
+  const trace = [...session.trace].sort((left, right) => left.at.localeCompare(right.at));
+  const origin = traceOrigin(trace);
+  const outputText = (event: TraceEvent) => {
+    try {
+      return JSON.stringify(event.output ?? "");
+    } catch {
+      return "";
+    }
+  };
+  const match =
+    [...trace].reverse().find((event) => event.status === "ok" && event.toolName === item.sourceTool && outputText(event).includes(item.evidenceId)) ??
+    [...trace].reverse().find((event) => event.status === "ok" && event.toolName === item.sourceTool);
+  if (!match) return null;
+  return `${toolLabel(match.toolName)} · ${formatStamp(match.at, origin)} · ${match.toolName}`;
+}
+
+function traceOrigin(trace: TraceEvent[]): number | null {
+  return trace.reduce<number | null>((earliest, event) => {
+    const time = Date.parse(event.at);
+    if (Number.isNaN(time)) return earliest;
+    return earliest === null || time < earliest ? time : earliest;
+  }, null);
+}
+
+function formatStamp(at: string, origin: number | null): string {
+  const time = Date.parse(at);
+  if (origin === null || Number.isNaN(time)) return "—";
+  return formatOffset(time - origin);
 }
 
 function formatOffset(deltaMs: number): string {
