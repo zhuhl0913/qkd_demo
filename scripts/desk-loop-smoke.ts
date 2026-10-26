@@ -123,7 +123,7 @@ assert.equal(loopSteps(midUpdate, true).find((step) => step.id === "hypothesize"
 const waitingApproval = deskMoment(firstRun, false);
 assert.equal(waitingApproval.focus, "approve");
 assert.equal(waitingApproval.title, "批准诊断");
-assert.match(waitingApproval.detail, /再运行/);
+assert.match(waitingApproval.detail, /提案/);
 assert.deepEqual(
   loopSteps(firstRun, false).map((step) => [step.label, step.mark, step.done]),
   [
@@ -163,7 +163,7 @@ const approved = session({
 });
 const rerun = deskMoment(approved, false);
 assert.equal(rerun.focus, "rerun");
-assert.match(rerun.detail, /诊断/);
+assert.match(rerun.detail, /已批准/);
 assert.equal(loopSteps(approved, false).find((step) => step.id === "approve")?.done, true);
 assert.equal(loopSteps(approved, false).find((step) => step.id === "fresh")?.mark, "current");
 

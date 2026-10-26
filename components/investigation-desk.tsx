@@ -7,25 +7,22 @@ import {
   deskMoment,
   diffSessions,
   EVIDENCE_CLASS_LABEL,
-  LOOP_STEPS,
-  loopSteps,
   shortTime,
   STATUS_LABEL,
   toolLabel,
   type DeskDiff,
   type DeskFocus,
-  type LoopStepView,
 } from "./desk-loop";
 import { canExportReport, downloadInvestigationReport } from "./investigation-report";
 import {
   PHASE_LABELS,
-  PHASES,
   type EvidenceClass,
   type Hypothesis,
   type HypothesisStatus,
   type Phase,
   type PublicIncident,
   type PublicSession,
+  type TraceEvent,
 } from "@/lib/types";
 
 type ApiBody = {
@@ -39,13 +36,6 @@ const EVIDENCE_REQUESTS = [
   ["logs", "日志"],
   ["maintenance", "维护"],
 ] as const;
-
-const LOADING_STEPS: LoopStepView[] = LOOP_STEPS.map((step, index) => ({
-  id: step.id,
-  label: step.label,
-  done: false,
-  mark: index === 0 ? "current" : "upcoming",
-}));
 
 const RUNNING_PHASES = new Set<Phase>(["ingesting", "investigating", "testing", "updating", "proposing_test"]);
 
@@ -205,9 +195,8 @@ export function InvestigationDesk() {
   const moment = session
     ? deskMoment(session, pending)
     : loadError
-      ? { focus: "wait" as const, title: "会话没有读出来", detail: "刷新页面后再看。" }
-      : { focus: "wait" as const, title: "正在读取事件", detail: "" };
-  const steps = session ? loopSteps(session, pending) : LOADING_STEPS;
+      ? { focus: "wait" as const, title: "会话没有读出来", detail: "" }
+      : { focus: "wait" as const, title: "读取会话", detail: "" };
   const showApprove = moment.focus === "approve";
   const keyNote =
     session &&
@@ -215,7 +204,7 @@ export function InvestigationDesk() {
     (moment.focus === "run" || moment.focus === "rerun") &&
     !moment.detail.includes("密钥") &&
     !moment.detail.includes("API_KEY");
-  const detail = keyNote ? `${moment.detail} 密钥未配置。` : moment.detail;
+  const detail = keyNote ? [moment.detail, "密钥未配置。"].filter(Boolean).join(" ") : moment.detail;
   const strayBanner = banner && banner !== session?.error ? banner : null;
   const exportReady = session ? canExportReport(session) : false;
   const showRun = Boolean(session) && (moment.focus === "run" || moment.focus === "rerun" || (moment.focus === "wait" && pending));
@@ -254,7 +243,7 @@ export function InvestigationDesk() {
           <DeskButton
             tone={moment.focus === "done" && exportReady ? "primary" : "quiet"}
             disabled={!exportReady}
-            title={exportReady ? "下载当前调查的 Markdown 报告" : "有假设或证据后可导出"}
+            title={exportReady ? "下载 Markdown" : "无假设或证据"}
             data-action="export-report"
             onClick={() => {
               if (!session || !canExportReport(session)) return;
@@ -306,7 +295,7 @@ export function InvestigationDesk() {
             run(() => postJson("/api/steer", { action: "request_evidence", evidenceClass }))
           }
         />
-        <TrailColumn session={session} highlight={highlight} pending={pending} phase={phase} steps={steps} />
+        <TrailColumn session={session} highlight={highlight} pending={pending} phase={phase} />
       </div>
 
       <DecisionRail
@@ -340,7 +329,7 @@ function CaseColumn({ session }: { session: PublicSession | null }) {
       aria-label="链路与症状"
     >
       <h2 className="nw-muted text-sm font-medium">链路</h2>
-      {session ? <LinkDiagram incident={session.incident} /> : <p className="nw-faint mt-3 text-sm">正在读取事件。</p>}
+      {session ? <LinkDiagram incident={session.incident} /> : null}
       {session ? (
         <>
           <h2 className="nw-muted mt-5 text-sm font-medium">症状</h2>
@@ -615,9 +604,7 @@ function HypothesisBoard({
       <h2 className="nw-muted text-sm font-medium">假设</h2>
       {hypotheses.length > 0 && session ? (
         <RequestRow session={session} pending={pending} onRequest={onRequest} />
-      ) : (
-        <p className="nw-faint text-sm">还没有假设。</p>
-      )}
+      ) : null}
       {hypotheses.length > 0 && session ? (
         <ul className="flex flex-col gap-3">
           {hypotheses.map((item) => (
@@ -708,7 +695,7 @@ function RequestRow({
     <div className="flex flex-col gap-2">
       <RequestButtons pending={pending} onRequest={onRequest} />
       {latest?.evidenceClass ? (
-        <p className="nw-muted text-sm">下一次查证会先看{EVIDENCE_CLASS_LABEL[latest.evidenceClass]}。</p>
+        <p className="nw-muted text-sm">先看{EVIDENCE_CLASS_LABEL[latest.evidenceClass]}。</p>
       ) : null}
     </div>
   );
@@ -738,9 +725,7 @@ function EvidenceBoard({ session, highlight }: { session: PublicSession | null; 
   return (
     <div className="flex flex-col gap-3">
       <h2 className="nw-muted text-sm font-medium">证据</h2>
-      {evidence.length === 0 || !session ? (
-        <p className="nw-faint text-sm">还没有证据。</p>
-      ) : (
+      {evidence.length === 0 || !session ? null : (
         <ul className="flex flex-col gap-3">
           {evidence.map((item) => {
             const isFresh = fresh.has(item.evidenceId);
@@ -838,154 +823,119 @@ function TrailColumn({
   highlight,
   pending,
   phase,
-  steps,
 }: {
   session: PublicSession | null;
   highlight: DeskDiff | null;
   pending: boolean;
   phase: Phase;
-  steps: LoopStepView[];
 }) {
+  const trail = session?.phaseTrail ?? [];
+  const path = trail.length > 1 ? trail.map((item) => PHASE_LABELS[item]).join(" → ") : "";
+  const count = session?.trace.length ?? 0;
   return (
-    <aside className="flex flex-col lg:min-h-0 lg:overflow-hidden" aria-label="进度与工具轨迹">
-      <div className="shrink-0 border-b border-[var(--nw-line)] px-4 py-4">
-        <h2 className="nw-muted text-sm font-medium">进度</h2>
-        <div className="mt-3">
-          <LoopTrack steps={steps} />
+    <aside className="flex flex-col lg:min-h-0 lg:overflow-hidden" aria-label="运行日志">
+      <div className="shrink-0 border-b border-[var(--nw-line)] px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="nw-muted text-sm font-medium">运行</h2>
+          <span className="flex items-center gap-2">
+            {count > 0 ? <span className="nw-faint font-mono text-xs">{count}</span> : null}
+            <span className={cx("nw-badge", (phase === "awaiting_test_approval" || phase === "error") && "nw-badge-priority")}>
+              {PHASE_LABELS[phase]}
+            </span>
+          </span>
         </div>
-        <p className="nw-faint mt-2 text-center text-xs">{PHASE_LABELS[phase]}</p>
+        {path ? <p className="nw-faint mt-2 text-xs leading-5">{path}</p> : null}
       </div>
-      <div className="nw-scroll flex flex-col gap-4 px-4 py-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-        <TraceTimeline session={session} highlight={highlight} pending={pending} />
-        <PhaseDetails phase={phase} trail={session?.phaseTrail ?? ["idle"]} />
+      <div className="nw-scroll px-4 py-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+        <RunLog session={session} highlight={highlight} pending={pending} phase={phase} />
       </div>
     </aside>
   );
 }
 
-function TraceTimeline({
+function RunLog({
   session,
   highlight,
   pending,
+  phase,
 }: {
   session: PublicSession | null;
   highlight: DeskDiff | null;
   pending: boolean;
+  phase: Phase;
 }) {
-  const trace = session?.trace ?? [];
+  const trace = [...(session?.trace ?? [])].sort((left, right) => left.at.localeCompare(right.at));
   const fresh = new Set(highlight?.traceIds ?? []);
+  const origin = trace.reduce<number | null>((earliest, event) => {
+    const time = Date.parse(event.at);
+    if (Number.isNaN(time)) return earliest;
+    return earliest === null || time < earliest ? time : earliest;
+  }, null);
+  const showLive = pending && phase !== "idle";
+  const showError = !pending && phase === "error" && Boolean(session?.error);
+  if (trace.length === 0 && !showLive && !showError) return null;
   return (
-    <div>
-      <h2 className="nw-muted text-sm font-medium">工具轨迹</h2>
-      {trace.length === 0 ? (
-        <p className="nw-faint mt-3 text-sm">{pending ? "这一轮还没有工具返回。" : "还没有工具调用。"}</p>
-      ) : (
-        <ol className="mt-4" aria-label="工具轨迹">
-          {trace.map((event, index) => {
-            const summary = briefInput(event.input);
-            const isNew = fresh.has(event.id);
-            const failed = event.status === "error";
-            return (
-              <li key={event.id} className="relative flex gap-3 pb-5 last:pb-0">
-                {index < trace.length - 1 ? (
-                  <span aria-hidden="true" className="nw-rule-wait absolute top-3 bottom-0 left-[5px] w-px" />
-                ) : null}
-                <span
-                  aria-hidden="true"
-                  className={cx(
-                    "relative z-10 mt-1 h-2.5 w-2.5 shrink-0 rounded-full border",
-                    failed && "border-[var(--nw-pop)] bg-[var(--nw-pop)]",
-                    !failed && isNew && "border-[var(--nw-pop)] bg-transparent",
-                    !failed && !isNew && "border-[var(--nw-line-strong)] bg-transparent",
-                  )}
-                />
-                <div className={cx("min-w-0", isNew && "desk-new px-2 py-1")}>
-                  <p className="text-sm font-medium">
-                    {toolLabel(event.toolName)}
-                    {isNew ? " · 新" : ""}
-                  </p>
-                  <p className={cx("text-xs", failed ? "nw-pop-text" : "nw-faint")}>
-                    {failed ? "失败" : "成功"} · {shortTime(event.at)}
-                  </p>
-                  {summary ? <p className="nw-muted mt-1 text-sm">{summary}</p> : null}
-                  {failed ? <p className="nw-pop-text mt-1 text-sm">{event.error}</p> : null}
-                  <details className="mt-1">
-                    <summary className="nw-faint text-xs">原始输入输出</summary>
-                    <p className="nw-faint mt-2 font-mono text-xs">{event.toolName}</p>
-                    <pre className="mt-1 text-xs">{JSON.stringify(event.input, null, 2)}</pre>
-                    {event.status === "ok" ? <pre className="mt-2 text-xs">{JSON.stringify(event.output, null, 2)}</pre> : null}
-                  </details>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </div>
-  );
-}
-
-function LoopTrack({ steps }: { steps: LoopStepView[] }) {
-  return (
-    <ol className="flex" aria-label="调查循环" data-desk="loop">
-      {steps.map((step, index) => {
-        const previousDone = index > 0 && steps[index - 1]?.done === true;
-        const nextFilled = step.done && index < steps.length - 1;
-        return (
-          <li key={step.id} className="flex min-w-0 flex-1 flex-col items-center gap-1">
-            <div className="flex w-full items-center">
-              <span aria-hidden="true" className={cx("h-px flex-1", index === 0 ? "bg-transparent" : previousDone ? "nw-rule-done" : "nw-rule-wait")} />
-              <span
-                className={cx(
-                  "nw-step",
-                  step.mark === "current" && "nw-step-current",
-                  step.mark === "done" && "nw-step-done",
-                  step.mark === "upcoming" && "nw-step-upcoming",
-                )}
-                aria-current={step.mark === "current" ? "step" : undefined}
-              >
-                {step.done ? "✓" : index + 1}
-              </span>
-              <span
-                aria-hidden="true"
-                className={cx("h-px flex-1", index === steps.length - 1 ? "bg-transparent" : nextFilled ? "nw-rule-done" : "nw-rule-wait")}
-              />
-            </div>
-            <span className={cx("text-center text-xs whitespace-nowrap", step.mark === "current" ? "font-medium text-[var(--nw-text)]" : "nw-faint")}>
-              {step.label}
-            </span>
-          </li>
-        );
-      })}
+    <ol>
+      {trace.map((event) => (
+        <ToolRow key={event.id} event={event} origin={origin} fresh={fresh.has(event.id)} />
+      ))}
+      {showLive ? (
+        <li className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-2 border-b border-[var(--nw-line)] py-2.5 last:border-b-0">
+          <span className="pt-0.5 font-mono text-[11px] text-[var(--nw-text)]">NOW</span>
+          <p className="text-sm font-medium">{PHASE_LABELS[phase]}</p>
+        </li>
+      ) : null}
+      {showError ? (
+        <li className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-2 py-2.5">
+          <span className="nw-faint pt-0.5 font-mono text-[11px]">—</span>
+          <div className="min-w-0">
+            <p className="nw-pop-text text-sm font-medium">{PHASE_LABELS.error}</p>
+            <p className="nw-muted mt-1 text-xs leading-5">{session?.error}</p>
+          </div>
+        </li>
+      ) : null}
     </ol>
   );
 }
 
-function PhaseDetails({ phase, trail }: { phase: Phase; trail: Phase[] }) {
+function ToolRow({ event, origin, fresh }: { event: TraceEvent; origin: number | null; fresh: boolean }) {
+  const summary = briefInput(event.input);
+  const failed = event.status === "error";
+  const time = Date.parse(event.at);
+  const stamp = origin === null || Number.isNaN(time) ? "—" : formatOffset(time - origin);
   return (
-    <details className="nw-panel px-3 py-2">
-      <summary className="nw-muted text-sm">状态机 · {PHASE_LABELS[phase]}</summary>
-      <ol className="mt-3 flex flex-col" data-phase={phase}>
-        {PHASES.map((item) => {
-          const active = item === phase;
-          return (
-            <li key={item} className="flex items-center gap-2 py-1 text-sm" aria-current={active ? "step" : undefined}>
-              <span
-                aria-hidden="true"
-                className={cx(
-                  "h-2 w-2 shrink-0 rounded-full",
-                  active ? "bg-[var(--nw-pop)]" : "border border-[var(--nw-line-strong)]",
-                )}
-              />
-              <span className={active ? "font-medium" : "nw-faint"}>{PHASE_LABELS[item]}</span>
-              <span className="nw-faint font-mono text-xs">{item}</span>
-            </li>
-          );
-        })}
-      </ol>
-      <p className="nw-faint mt-2 text-xs">经过：{trail.map((item) => PHASE_LABELS[item]).join(" → ")}</p>
-    </details>
+    <li
+      className={cx(
+        "grid grid-cols-[3.25rem_minmax(0,1fr)] gap-2 border-b border-[var(--nw-line)] py-2.5 last:border-b-0",
+        fresh && "desk-new",
+      )}
+    >
+      <span className="nw-faint pt-0.5 font-mono text-[11px]">{stamp}</span>
+      <div className="min-w-0">
+        <p className="flex min-w-0 items-baseline gap-2">
+          <span className={cx("shrink-0 text-sm font-medium", failed && "nw-pop-text")}>{toolLabel(event.toolName)}</span>
+          <span className="nw-faint truncate font-mono text-[11px]">{event.toolName}</span>
+        </p>
+        {summary ? <p className="nw-muted mt-1 text-xs leading-5">{summary}</p> : null}
+        {failed ? <p className="nw-pop-text mt-1 text-xs leading-5">{event.error}</p> : null}
+        <details className="mt-1">
+          <summary className="nw-faint text-xs">{failed ? "输入" : "输出"}</summary>
+          <p className="nw-faint mt-2 font-mono text-[11px]">{event.toolName}</p>
+          <pre className="mt-1 text-xs">{JSON.stringify(event.input, null, 2)}</pre>
+          {event.status === "ok" ? <pre className="mt-2 text-xs">{JSON.stringify(event.output, null, 2)}</pre> : null}
+        </details>
+      </div>
+    </li>
   );
+}
+
+function formatOffset(deltaMs: number): string {
+  const seconds = Math.max(0, deltaMs) / 1000;
+  if (seconds < 10) {
+    const rounded = Math.round(seconds * 10) / 10;
+    return `+${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}s`;
+  }
+  return `+${Math.round(seconds)}s`;
 }
 
 function StatusBadge({ status }: { status: HypothesisStatus }) {
